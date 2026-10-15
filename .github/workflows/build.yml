@@ -1,0 +1,173 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: "Artilody Soundsculp"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  linux:
+    name: Linux (${{ matrix.name }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu
+            container: ""
+            label: ubuntu-22.04-24.04
+          - name: debian
+            container: debian:12
+            label: debian-12
+    container: ${{ matrix.container }}
+    steps:
+      - name: Install dependencies (Debian container)
+        if: matrix.container != ''
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y git cmake g++ make pkg-config file \
+            libasound2-dev libjack-jackd2-dev libfreetype-dev libfontconfig1-dev libx11-dev \
+            libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev \
+            libgl1-mesa-dev xvfb xauth ffmpeg ca-certificates
+      - name: Install dependencies (Ubuntu)
+        if: matrix.container == ''
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y cmake g++ pkg-config \
+            libasound2-dev libjack-jackd2-dev libfreetype6-dev libfontconfig1-dev libx11-dev \
+            libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev \
+            libgl1-mesa-dev xvfb ffmpeg
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --config Release -j4
+      - name: Self test
+        run: |
+          xvfb-run -a "build/ArtilodySoundsculp_artefacts/Release/Artilody Soundsculp" --selftest
+          xvfb-run -a "build/ArtilodySoundsculp_artefacts/Release/Artilody Soundsculp" --uitest
+      - name: Package (.deb)
+        run: |
+          cd build
+          cpack -G DEB
+          mkdir -p ../dist
+          VERSION=$(grep -m1 "project(ArtilodySoundsculp VERSION" ../CMakeLists.txt | sed -E 's/.*VERSION ([0-9.]+).*/\1/')
+          mv artilody-soundsculp_*_amd64.deb "../dist/artilody-soundsculp_${VERSION}_${{ matrix.label }}_amd64.deb"
+          ls -la ../dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.name }}
+          path: dist/*.deb
+
+  # ---------------------------------------------------------------------------
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Stage files
+        shell: pwsh
+        run: |
+          $stage = "stage"
+          New-Item -ItemType Directory -Force -Path $stage, "$stage\docs", dist | Out-Null
+          Copy-Item "build\ArtilodySoundsculp_artefacts\Release\Artilody Soundsculp.exe" $stage
+          Copy-Item docs\pdf\*.pdf "$stage\docs" -ErrorAction SilentlyContinue
+          Copy-Item LICENSE "$stage\LICENSE.txt"
+      - name: Bundle ffmpeg (for MP3 / M4A / Opus export)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_tmp
+          $exe = Get-ChildItem -Recurse ffmpeg_tmp -Filter ffmpeg.exe | Select-Object -First 1
+          Copy-Item $exe.FullName stage\ffmpeg.exe
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'project\(ArtilodySoundsculp VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          & $iscc "/DAppVersion=$version" "/DSourceDir=$PWD\stage" packaging\windows\installer.iss
+          Compress-Archive -Path stage\* -DestinationPath "dist\ArtilodySoundsculp-$version-Windows-Portable.zip"
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+  # ---------------------------------------------------------------------------
+  macos:
+    name: macOS (Universal)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+      - name: Build
+        run: cmake --build build --config Release --parallel -- -quiet
+      - name: Self test
+        run: |
+          "build/ArtilodySoundsculp_artefacts/Release/Artilody Soundsculp.app/Contents/MacOS/Artilody Soundsculp" --selftest
+      - name: Bundle ffmpeg (universal)
+        continue-on-error: true
+        run: |
+          curl -L -o ff_arm.zip https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffmpeg.zip
+          curl -L -o ff_x64.zip https://ffmpeg.martin-riedl.de/redirect/latest/macos/amd64/release/ffmpeg.zip
+          mkdir -p ff_arm ff_x64
+          unzip -o ff_arm.zip -d ff_arm
+          unzip -o ff_x64.zip -d ff_x64
+          lipo -create ff_arm/ffmpeg ff_x64/ffmpeg -output ffmpeg
+          chmod +x ffmpeg
+          cp ffmpeg "build/ArtilodySoundsculp_artefacts/Release/Artilody Soundsculp.app/Contents/MacOS/ffmpeg"
+      - name: Sign (ad-hoc) and create DMG
+        run: |
+          VERSION=$(grep -m1 "project(ArtilodySoundsculp VERSION" CMakeLists.txt | sed -E 's/.*VERSION ([0-9.]+).*/\1/')
+          APP="build/ArtilodySoundsculp_artefacts/Release/Artilody Soundsculp.app"
+          codesign --force --deep --sign - "$APP"
+          mkdir -p dmg dist
+          cp -R "$APP" dmg/
+          ln -s /Applications dmg/Applications
+          mkdir -p dmg/Manuals
+          cp docs/pdf/*.pdf dmg/Manuals/ || true
+          hdiutil create -volname "Artilody Soundsculp" -srcfolder dmg -ov -format UDZO "dist/ArtilodySoundsculp-${VERSION}-macOS-Universal.dmg"
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.dmg
+
+  # ---------------------------------------------------------------------------
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [ linux, windows, macos ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect files
+        run: |
+          mkdir -p release
+          find artifacts -type f -exec cp {} release/ \;
+          cp docs/pdf/*.pdf release/ || true
+          ls -la release
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Artilody Soundsculp ${{ github.ref_name }}
+          body_path: docs/RELEASE_NOTES.md
+          files: release/*

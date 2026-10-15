@@ -1,0 +1,9 @@
+build/
+build-*/
+stage/
+dist/
+.vscode/
+.idea/
+*.user
+.DS_Store
+ArtilodySoundsculplydeditor.png

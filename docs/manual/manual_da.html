@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<title>Artilody Soundsculp – Brugermanual</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="cover">
+  <img class="logo" src="../../Resources/icon_256.png" alt="Logo">
+  <h1>Artilody Soundsculp</h1>
+  <div class="sub">Brugermanual – dansk</div>
+  <div class="ver">Version 1.0.0</div>
+</div>
+
+<h2>Indhold</h2>
+<ol class="toc">
+  <li>Introduktion</li>
+  <li>Installation</li>
+  <li>Skærmbilledet</li>
+  <li>Spor: åbne, oprette, indsætte og flette</li>
+  <li>Markér et område med musen</li>
+  <li>Redigering</li>
+  <li>Tone (pitch)</li>
+  <li>Parametrisk EQ</li>
+  <li>Støjfjerner</li>
+  <li>Volumenlinjen</li>
+  <li>Tekstmarkører</li>
+  <li>Afspilning og optagelse</li>
+  <li>Eksport</li>
+  <li>Fortryd, zoom og indstillinger</li>
+  <li>Tastaturgenveje</li>
+  <li>Fejlfinding</li>
+</ol>
+
+<h2>1. Introduktion</h2>
+<p>Artilody Soundsculp er en enkel lydredigerings-app. Du kan åbne flere lydfiler på én gang (hver fil bliver et <b>spor</b>),
+oprette tomme spor, klippe og kopiere lyd mellem sporene, rette lyden med effekter og til sidst eksportere et enkelt spor
+eller alle spor mixet sammen til én fil.</p>
+<p>Programmet kan bl.a.: markere med musen, trimme, klippe/kopiere/indsætte, fade ind og ud, normalisere, fjerne stilhed,
+loope, vende lyd baglæns, hæve og sænke tonen uden at ændre hastigheden, bruge en parametrisk EQ og en støjfjerner,
+tegne en volumenlinje på hvert spor, sætte tekstmarkører, optage fra mikrofon og eksportere til WAV, FLAC, MP3, OGG, AIFF, M4A og Opus.</p>
+<p>Alle ændringer kan fortrydes. Den originale fil ændres aldrig – resultatet gemmes først, når du eksporterer.</p>
+
+<h2>2. Installation</h2>
+<p>Hent installationsfilen fra siden <b>Releases</b> på
+<code>github.com/shenphenchoedron-hue/Artilody-Soundsculp</code>.</p>
+<h3>Windows (10 og 11)</h3>
+<ol>
+  <li>Hent <code>ArtilodySoundsculp-1.0.0-Windows-Setup.exe</code>.</li>
+  <li>Dobbeltklik på filen. Hvis Windows SmartScreen viser "Windows beskyttede din pc", klik <b>Flere oplysninger</b> og derefter <b>Kør alligevel</b>.</li>
+  <li>Følg guiden. Programmet findes derefter i Start-menuen sammen med manualerne.</li>
+</ol>
+<p>Der findes også en <i>Portable</i>-zip, som kan pakkes ud og køres uden installation.</p>
+<h3>macOS (11 eller nyere, Intel og Apple Silicon)</h3>
+<ol>
+  <li>Hent <code>ArtilodySoundsculp-1.0.0-macOS-Universal.dmg</code> og åbn den.</li>
+  <li>Træk <b>Artilody Soundsculp</b> over i mappen <b>Programmer</b> (Applications).</li>
+  <li>Første gang: højreklik (eller ctrl-klik) på programmet og vælg <b>Åbn</b>, og bekræft med <b>Åbn</b>. Appen er ikke signeret af Apple, så macOS spørger én gang.
+  Hjælper det ikke, så åbn Terminal og skriv: <code>xattr -cr "/Applications/Artilody Soundsculp.app"</code></li>
+  <li>Når du optager første gang, beder macOS om adgang til mikrofonen – svar <b>OK</b>.</li>
+</ol>
+<h3>Debian (12+) og Ubuntu (22.04 / 24.04)</h3>
+<p>Hent den <code>.deb</code>-fil der passer til dit system (<code>debian-12</code> eller <code>ubuntu-22.04-24.04</code>). Installér med:</p>
+<p><code>sudo apt install ./artilody-soundsculp_1.0.0_debian-12_amd64.deb</code></p>
+<p>Programmet findes derefter i programmenuen under <b>Lyd og video</b>, eller startes med kommandoen <code>artilody-soundsculp</code>.
+Pakken anbefaler <code>ffmpeg</code>, som bruges til MP3-, M4A- og Opus-eksport. Installeres det ikke automatisk: <code>sudo apt install ffmpeg</code>.</p>
+<p>Afinstallér med <code>sudo apt remove artilody-soundsculp</code>.</p>
+
+<div class="page-break"></div>
+<h2>3. Skærmbilledet</h2>
+<img class="shot" src="../images/screenshot_da.png" alt="Skærmbillede">
+<table>
+  <tr><th>Område</th><th>Beskrivelse</th></tr>
+  <tr><td>Topbjælken</td><td>Logo, transportknapper (optag, til start, afspil, stop, loop), valg af spor, fortryd/gentag, zoom,
+      <b>+</b> (spor-menu), visning af markering og længde, <b>Eksport</b> og indstillinger (tandhjul).</td></tr>
+  <tr><td>Værktøjslinjen</td><td>Markér, Volumen, Trim, Klip, Kopiér, Indsæt, Fade ind, Fade ud, Normalisér, Stilhedstrim, Loop, Baglæns, Tone.
+      Til højre: knapper der viser/skjuler EQ og Støjfjerner.</td></tr>
+  <tr><td>Spor (venstre)</td><td>Alle åbne spor. Klik for at vælge, <b>×</b> lukker sporet, <b>+</b> åbner spor-menuen. En stjerne (*) betyder ikke-eksporterede ændringer.</td></tr>
+  <tr><td>Fil (venstre)</td><td>Navn, format, samplerate, bitdybde, kanaler, længde og filstørrelse for det valgte spor.</td></tr>
+  <tr><td>Markører (venstre)</td><td>Listen over tekstmarkører. Her skriver du teksten til hver markør.</td></tr>
+  <tr><td>Bølgeformen (midten)</td><td>Tidslinje øverst, kanalerne (L/R), den orange volumenlinje og nederst <b>markørlinjen</b>.
+      Under den ligger oversigten over hele sporet.</td></tr>
+  <tr><td>EQ og Støjfjerner (højre)</td><td>Parametrisk EQ med 4 bånd og støjfjerner med spektrumvisning.</td></tr>
+  <tr><td>Statuslinjen</td><td>Format, <b>Afspil alle spor</b>, position, markering, beskeder og zoom.</td></tr>
+</table>
+
+<h2>4. Spor: åbne, oprette, indsætte og flette</h2>
+<h3>Åbne lydfiler</h3>
+<p>Klik <b>+</b> (i topbjælken eller i Spor-panelet) og vælg <b>Åbn lydfiler…</b> (<kbd>Ctrl+O</kbd>). Du kan vælge flere filer på én gang.
+Du kan også trække filer direkte ind i vinduet. Hver fil åbnes som et nyt spor.</p>
+<p>Understøttede formater: WAV, AIFF, FLAC, OGG, MP3 – og med ffmpeg også M4A/AAC, Opus, WMA m.fl.</p>
+<h3>Nyt tomt spor</h3>
+<p>Vælg <b>+ → Nyt tomt spor</b> (<kbd>Ctrl+N</kbd>). Et tomt spor viser 30 sekunder, så du kan klikke en position.
+Derefter kan du:</p>
+<ul>
+  <li><b>Indsætte en lydfil</b>: <b>+ → Indsæt lydfil ved positionen…</b>. Filen sættes ind der, hvor du har klikket.</li>
+  <li><b>Kopiere en bid fra et andet spor</b>: vælg det andet spor, markér et område, tryk <b>Kopiér</b> (<kbd>Ctrl+C</kbd>),
+      vælg det tomme spor, klik på positionen og tryk <b>Indsæt</b> (<kbd>Ctrl+V</kbd>).</li>
+</ul>
+<p>Klikker du efter lydens slutning, fyldes mellemrummet automatisk med stilhed. Har sporene forskellig samplerate eller antal kanaler,
+tilpasses lyden automatisk.</p>
+<h3>Flette spor til ét spor</h3>
+<p>Vælg <b>+ → Flet spor til ét spor…</b>. Sæt flueben ved de spor, der skal med, og tryk <b>Flet</b>. Sporene mixes sammen
+(alle starter ved 0:00) til et nyt spor kaldet "Flettet spor". Volumenlinjerne medregnes, og markørerne kopieres med.
+Bliver mixet for højt, sænkes niveauet automatisk, så det ikke forvrænger. Vælg evt. <i>Luk de flettede spor bagefter</i>.</p>
+<div class="tip">Vil du blot have alle spor i én fil, kan du også bruge <b>Eksport → Alle spor mixet til én fil</b> (se afsnit 13).
+Slå <b>Afspil alle spor</b> til nederst for at høre mixet først.</div>
+<h3>Andre spor-funktioner</h3>
+<p>Spor-menuen har også <b>Duplikér spor</b>, <b>Omdøb spor…</b> og <b>Luk spor</b>.</p>
+
+<h2>5. Markér et område med musen</h2>
+<ul>
+  <li><b>Træk</b> i bølgeformen for at markere. Markeringen bliver lilla.</li>
+  <li>Træk i de hvide håndtag i kanten for at justere start og slut. <kbd>Shift</kbd>+klik udvider markeringen.</li>
+  <li>Et enkelt klik fjerner markeringen og sætter positionen (den hvide streg).</li>
+  <li><b>Dobbeltklik</b> markerer stykket mellem to markører – fx et helt vers.</li>
+  <li><kbd>Ctrl+A</kbd> markerer hele sporet. Klik i tidslinjen øverst for at flytte positionen.</li>
+</ul>
+<p>Start, slut og længde vises i topbjælken og statuslinjen.</p>
+
+<h2>6. Redigering</h2>
+<p>De fleste effekter virker på markeringen. Er intet markeret, virker de på hele sporet.</p>
+<table>
+  <tr><th>Knap</th><th>Funktion</th></tr>
+  <tr><td><b>Trim</b> (<kbd>Ctrl+T</kbd>)</td><td>Beholder kun markeringen og fjerner resten.</td></tr>
+  <tr><td><b>Klip</b> (<kbd>Ctrl+X</kbd>)</td><td>Fjerner markeringen og lægger den i udklipsholderen.</td></tr>
+  <tr><td><b>Kopiér</b> (<kbd>Ctrl+C</kbd>)</td><td>Kopierer markeringen til udklipsholderen.</td></tr>
+  <tr><td><b>Indsæt</b> (<kbd>Ctrl+V</kbd>)</td><td>Indsætter ved positionen, eller erstatter markeringen. Virker også mellem spor.</td></tr>
+  <tr><td><kbd>Delete</kbd></td><td>Sletter markeringen.</td></tr>
+  <tr><td><b>Fade ind / Fade ud</b></td><td>Lyden glider blødt ind/ud over markeringen. Uden markering bruges de første/sidste 3 sekunder.</td></tr>
+  <tr><td><b>Normalisér</b></td><td>Hæver (eller sænker) lyden, så det højeste punkt ligger på −0,1 dB.</td></tr>
+  <tr><td><b>Stilhedstrim</b></td><td>Fjerner stilhed i starten og slutningen. Du angiver tærsklen i dB (standard −50 dB).</td></tr>
+  <tr><td><b>Loop</b></td><td>Gentager markeringen et valgt antal gange (med små overgange, så der ikke klikker).</td></tr>
+  <tr><td><b>Baglæns</b></td><td>Vender markeringen baglæns.</td></tr>
+  <tr><td><b>Tone</b></td><td>Hæver eller sænker tonen uden at ændre hastigheden (se afsnit 7).</td></tr>
+</table>
+
+<h2>7. Tone (pitch)</h2>
+<p>Klik <b>Tone</b>. Vælg mellem −12 og +12 halvtoner (i trin af 0,1). Knapperne −12, −1, +1, +12 giver hurtige valg.
+Tryk <b>Forhør</b> for at lytte (op til 10 sekunder), og <b>Anvend</b> for at gemme ændringen. Længden og tempoet bevares.</p>
+
+<h2>8. Parametrisk EQ</h2>
+<p>EQ-panelet har 4 bånd. Hvert bånd har en <b>type</b> (Lav shelf, Klokke, Høj shelf, Lav-cut, Høj-cut, Notch),
+<b>frekvens</b>, <b>forstærkning</b> (dB), <b>Q</b> (bredde) og en tænd/sluk-knap.</p>
+<ul>
+  <li>Træk de farvede punkter i kurven: vandret = frekvens, lodret = forstærkning. Musehjulet over et punkt ændrer Q. Dobbeltklik nulstiller forstærkningen.</li>
+  <li>Værdierne kan også ændres ved at trække i felterne eller dobbeltklikke og skrive en værdi.</li>
+  <li>Rullemenuen øverst har forudindstillinger (Bas-boost, Vokal-tydelighed, Varme, Fjern rumlen, Telefon …).</li>
+  <li>Kontakten øverst til højre gør, at du <b>hører EQ'en live</b> under afspilning.</li>
+  <li><b>Anvend</b> lægger EQ'en permanent på markeringen (eller hele sporet). Slå derefter kontakten fra, så du ikke hører den to gange.</li>
+</ul>
+
+<h2>9. Støjfjerner</h2>
+<p>Støjfjerneren dæmper konstant baggrundsstøj (sus, brum, ventilator).</p>
+<ol>
+  <li>Bedst resultat: markér et stykke med <b>kun støj</b> og vælg <b>… → Lær støjprofil fra markering</b>. Kontakten tændes.
+      Uden lært profil estimeres støjen automatisk.</li>
+  <li>Markér det der skal renses (eller intet for hele sporet).</li>
+  <li>Justér <b>Reduktion</b> (hvor meget støjen dæmpes), <b>Følsomhed</b> (hvor meget der regnes som støj) og
+      <b>Artefaktkontrol</b> (udglatning mod "vandet" lyd).</li>
+  <li>Spektret viser original (grå) og filtreret (cyan). Tryk <b>Forhør</b> for at lytte (op til 15 s). Hovedtelefon-knappen lader dig høre <i>kun den støj der fjernes</i>.</li>
+  <li>Tryk <b>Anvend</b>.</li>
+</ol>
+
+<h2>10. Volumenlinjen</h2>
+<p>Hvert spor har en orange volumenlinje, som styrer lydstyrken undervejs uden at ændre selve lyden. Den bruges ved afspilning, fletning og eksport.</p>
+<ul>
+  <li>Vælg værktøjet <b>Volumen</b> og klik på bølgeformen for at indsætte punkter. Træk punkterne op og ned (og til siden).
+      Midten er 0 dB (uændret), toppen er +6 dB, bunden er stilhed. Værdien vises, mens du trækker.</li>
+  <li>Med værktøjet <b>Markér</b> kan du stadig trække eksisterende punkter, og dobbeltklikke på linjen for at indsætte nye.</li>
+  <li>Højreklik på et punkt for at slette det. <b>Fil-panelet → … → Nulstil volumenlinje</b> fjerner alle punkter.</li>
+</ul>
+
+<h2>11. Tekstmarkører</h2>
+<p>Markører viser fx hvor et vers eller omkvæd starter.</p>
+<ul>
+  <li>Klik på <b>markørlinjen</b> under bølgeformen for at indsætte en markør. Feltet i <b>Markører</b>-panelet til venstre bliver aktivt –
+      skriv teksten (fx "Vers 1") og tryk <kbd>Enter</kbd>.</li>
+  <li>Markøren vises som en farvet etiket på markørlinjen, som en trekant på tidslinjen og som en tynd streg gennem bølgeformen.</li>
+  <li>Træk en markør for at flytte den. Højreklik for at omdøbe, markere til næste markør eller slette.</li>
+  <li><b>+</b> i Markører-panelet (eller tasten <kbd>M</kbd>) sætter en markør ved positionen – også under afspilning.</li>
+  <li>Klik på en markør i listen for at springe derhen. <b>×</b> sletter markøren.</li>
+</ul>
+
+<h2>12. Afspilning og optagelse</h2>
+<table>
+  <tr><th>Knap</th><th>Funktion</th></tr>
+  <tr><td><span class="btn rec">●</span> Optag (<kbd>R</kbd>)</td><td>Starter en optagelse på et nyt spor. Knappen lyser rødt, mens der optages. Tryk igen eller på Stop for at afslutte.</td></tr>
+  <tr><td><span class="btn home">|◀</span> Til start (<kbd>Home</kbd>)</td><td>Flytter positionen til starten.</td></tr>
+  <tr><td><span class="btn play">▶</span> Afspil (<kbd>Mellemrum</kbd>)</td><td>Afspiller fra positionen eller markeringens start. Knappen lyser grønt under afspilning.</td></tr>
+  <tr><td><span class="btn stop">■</span> Stop</td><td>Stopper afspilning eller optagelse.</td></tr>
+  <tr><td><span class="btn loop">⟳</span> Loop (<kbd>L</kbd>)</td><td>Gentager markeringen (eller hele sporet) igen og igen under afspilning.</td></tr>
+</table>
+<p><b>Afspil alle spor</b> nederst afspiller alle spor mixet sammen. Lydenhed (mikrofon og højttaler) vælges under
+<b>Indstillinger → Lydindstillinger…</b>.</p>
+
+<h2>13. Eksport</h2>
+<p>Klik <b>Eksport</b> (<kbd>Ctrl+E</kbd>) og vælg hvad der skal eksporteres:</p>
+<ul>
+  <li><b>Aktuelt spor</b> – hele det valgte spor.</li>
+  <li><b>Kun markering</b> – kun det markerede område.</li>
+  <li><b>Alle spor mixet til én fil</b> – alle spor lagt sammen.</li>
+</ul>
+<p>Vælg derefter format og filnavn. Volumenlinjen medregnes altid.</p>
+<table>
+  <tr><th>Format</th><th>Bemærkning</th></tr>
+  <tr><td>WAV 16 / 24 / 32-bit float</td><td>Ukomprimeret, bedste kvalitet.</td></tr>
+  <tr><td>AIFF 24-bit</td><td>Ukomprimeret (populært på Mac).</td></tr>
+  <tr><td>FLAC 16 / 24-bit</td><td>Tabsfri komprimering.</td></tr>
+  <tr><td>OGG Vorbis 192 kbps</td><td>Komprimeret.</td></tr>
+  <tr><td>MP3 320 / 192 kbps</td><td>Komprimeret – kræver ffmpeg*.</td></tr>
+  <tr><td>M4A / AAC 256 kbps, Apple Lossless</td><td>Kræver ffmpeg*.</td></tr>
+  <tr><td>Opus 160 kbps</td><td>Kræver ffmpeg*.</td></tr>
+</table>
+<p>* ffmpeg følger med installationen på Windows og macOS. På Linux installeres det med <code>sudo apt install ffmpeg</code>.</p>
+
+<h2>14. Fortryd, zoom og indstillinger</h2>
+<ul>
+  <li><b>Fortryd/Gentag</b>: pileknapperne eller <kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd>. Hvert spor har sin egen historik.</li>
+  <li><b>Zoom</b>: luppen, skyderen, <kbd>+</kbd>/<kbd>−</kbd>, <kbd>0</kbd> (hele sporet) eller <kbd>Ctrl</kbd>+musehjul. Musehjulet alene ruller sidelæns. Klik/træk i oversigten for at flytte visningen.</li>
+  <li><b>Indstillinger</b> (tandhjul): Lydindstillinger, Sprog (dansk/engelsk – kræver genstart), Tastaturgenveje og Om.</li>
+</ul>
+
+<h2>15. Tastaturgenveje</h2>
+<table>
+  <tr><th>Tast</th><th>Funktion</th><th>Tast</th><th>Funktion</th></tr>
+  <tr><td><kbd>Mellemrum</kbd></td><td>Afspil / stop</td><td><kbd>Ctrl+X/C/V</kbd></td><td>Klip / kopiér / indsæt</td></tr>
+  <tr><td><kbd>R</kbd></td><td>Optag</td><td><kbd>Delete</kbd></td><td>Slet markering</td></tr>
+  <tr><td><kbd>Home</kbd></td><td>Til start</td><td><kbd>Ctrl+T</kbd></td><td>Trim</td></tr>
+  <tr><td><kbd>L</kbd></td><td>Loop til/fra</td><td><kbd>Ctrl+Z / Ctrl+Y</kbd></td><td>Fortryd / gentag</td></tr>
+  <tr><td><kbd>M</kbd></td><td>Ny markør</td><td><kbd>Ctrl+O</kbd></td><td>Åbn filer</td></tr>
+  <tr><td><kbd>Ctrl+A</kbd></td><td>Markér alt</td><td><kbd>Ctrl+N</kbd></td><td>Nyt tomt spor</td></tr>
+  <tr><td><kbd>+ / − / 0</kbd></td><td>Zoom ind / ud / hele sporet</td><td><kbd>Ctrl+E</kbd></td><td>Eksport</td></tr>
+</table>
+<p>På Mac bruges <kbd>Cmd</kbd> i stedet for <kbd>Ctrl</kbd>.</p>
+
+<h2>16. Fejlfinding</h2>
+<ul>
+  <li><b>Ingen lyd</b>: Kontrollér udgangsenheden under <b>Indstillinger → Lydindstillinger</b>.</li>
+  <li><b>Optagelse virker ikke</b>: Vælg en indgangsenhed og aktivér indgangskanaler i Lydindstillinger. På macOS: giv adgang til mikrofonen under Systemindstillinger → Anonymitet og sikkerhed → Mikrofon.</li>
+  <li><b>MP3/M4A/Opus er gråtonet</b>: ffmpeg blev ikke fundet. Installér ffmpeg (Linux: <code>sudo apt install ffmpeg</code>, macOS: <code>brew install ffmpeg</code>).</li>
+  <li><b>En fil kan ikke åbnes</b>: Formatet kræver måske ffmpeg (fx M4A på Linux).</li>
+  <li><b>macOS siger at appen er beskadiget</b>: kør <code>xattr -cr "/Applications/Artilody Soundsculp.app"</code> i Terminal.</li>
+</ul>
+<p>Fejl og ønsker kan meldes på GitHub under <b>Issues</b>. Artilody Soundsculp er fri software under GPL-3.0 og er bygget med JUCE.</p>
+
+</body>
+</html>

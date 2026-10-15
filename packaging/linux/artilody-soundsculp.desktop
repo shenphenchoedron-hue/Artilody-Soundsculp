@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Artilody Soundsculp
+GenericName=Audio Editor
+GenericName[da]=Lydredigering
+Comment=Simple audio editor
+Comment[da]=Simpel lydredigerings-app
+Exec=artilody-soundsculp %F
+Icon=artilody-soundsculp
+Terminal=false
+Categories=AudioVideo;Audio;AudioVideoEditing;
+MimeType=audio/x-wav;audio/wav;audio/flac;audio/x-flac;audio/ogg;audio/mpeg;audio/x-aiff;audio/mp4;
