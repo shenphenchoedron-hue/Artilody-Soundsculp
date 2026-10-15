@@ -1,8 +1,9 @@
 ; Inno Setup script for Artilody Soundsculp
-; Compile with:  iscc /DAppVersion=1.0.0 /DSourceDir=<staging dir> installer.iss
+; Compile with:  iscc /DAppVersion=<x.y.z> /DSourceDir=<staging dir> installer.iss
+; (CI passes the version from CMakeLists.txt; there is deliberately no fallback.)
 
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #error AppVersion is not defined. Compile with iscc /DAppVersion=x.y.z (the project version from CMakeLists.txt).
 #endif
 #ifndef SourceDir
   #define SourceDir "..\..\stage"
@@ -26,7 +27,6 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 LicenseFile=..\..\LICENSE
-ChangesAssociations=yes
 
 [Languages]
 Name: "danish"; MessagesFile: "compiler:Languages\Danish.isl"
@@ -35,6 +35,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
+[InstallDelete]
+; Earlier versions shipped a bundled ffmpeg.exe; remove it when upgrading in place.
+Type: files; Name: "{app}\ffmpeg.exe"
+
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
@@ -42,6 +46,7 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 Name: "{group}\Artilody Soundsculp"; Filename: "{app}\Artilody Soundsculp.exe"
 Name: "{group}\Manual (Dansk)"; Filename: "{app}\docs\Artilody-Soundsculp-Manual-DA.pdf"
 Name: "{group}\Manual (English)"; Filename: "{app}\docs\Artilody-Soundsculp-Manual-EN.pdf"
+Name: "{group}\Licenses and third-party notices"; Filename: "{app}\THIRD_PARTY_NOTICES.txt"
 Name: "{group}\{cm:UninstallProgram,Artilody Soundsculp}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Artilody Soundsculp"; Filename: "{app}\Artilody Soundsculp.exe"; Tasks: desktopicon
 

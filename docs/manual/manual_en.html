@@ -11,7 +11,7 @@
   <img class="logo" src="../../Resources/icon_256.png" alt="Logo">
   <h1>Artilody Soundsculp</h1>
   <div class="sub">User Manual – English</div>
-  <div class="ver">Version 1.1.2</div>
+  <div class="ver">Version 1.1.3</div>
 </div>
 
 <h2>Contents</h2>
@@ -42,7 +42,7 @@ All tracks are shown below each other on a shared timeline and play together. Th
 which can be split, moved around – also to other tracks – and joined again, much like in Audacity.</p>
 <p>Features: trim, cut/copy/paste, split and join clips, fade in and out, normalize, silence trim, loop, reverse,
 pitch shifting without changing the speed, a parametric EQ, a noise remover, a volume line on every track, coloured markers,
-recording from a microphone, merging tracks, and export to WAV, AIFF, FLAC, OGG, MP3, M4A and Opus.</p>
+recording from a microphone, merging tracks, and export to WAV, AIFF, FLAC and Ogg Vorbis.</p>
 <p>The program is in English. A Danish interface can be chosen under <b>Settings (gear) → Language</b> (requires a restart).</p>
 <p>Every change can be undone. The original file is never modified – the result is only written when you export.</p>
 
@@ -50,23 +50,25 @@ recording from a microphone, merging tracks, and export to WAV, AIFF, FLAC, OGG,
 <p>Download the installer from the <b>Releases</b> page at <code>github.com/shenphenchoedron-hue/Artilody-Soundsculp</code>.</p>
 <h3>Windows (10 and 11)</h3>
 <ol>
-  <li>Download <code>ArtilodySoundsculp-1.1.2-Windows-Setup.exe</code> and double-click it.</li>
+  <li>Download <code>ArtilodySoundsculp-1.1.3-Windows-Setup.exe</code> and double-click it.</li>
   <li>If Windows SmartScreen shows "Windows protected your PC", click <b>More info</b> → <b>Run anyway</b>.</li>
   <li>Follow the wizard. The program and the manuals are then in the Start menu.</li>
 </ol>
 <p>A <i>Portable</i> zip is also available – unpack it and run the program without installing.</p>
 <h3>macOS (11 or newer, Intel and Apple Silicon)</h3>
 <ol>
-  <li>Download <code>ArtilodySoundsculp-1.1.2-macOS-Universal.dmg</code>, open it and drag the program to <b>Applications</b>.</li>
-  <li>The first time: right-click the app, choose <b>Open</b> and confirm. If that does not help, type in Terminal:
-      <code>xattr -cr "/Applications/Artilody Soundsculp.app"</code></li>
+  <li>Download <code>ArtilodySoundsculp-1.1.3-macOS-Universal.dmg</code>, open it and drag the program to <b>Applications</b>.</li>
+  <li>The first time (the app is not notarised): on macOS 15 Sequoia or newer, try to open the app once, then open
+      <b>System Settings → Privacy &amp; Security</b> and click <b>Open Anyway</b> next to the message about Artilody Soundsculp.
+      On macOS 11–14 you can instead right-click the app, choose <b>Open</b> and confirm. Alternatively type in Terminal:
+      <code>xattr -dr com.apple.quarantine "/Applications/Artilody Soundsculp.app"</code></li>
   <li>The first time you record, macOS asks for microphone access – answer <b>OK</b>.</li>
 </ol>
 <h3>Debian (12+) and Ubuntu (22.04 / 24.04)</h3>
 <p>Download the <code>.deb</code> file for your system and install it, for example:</p>
-<p><code>sudo apt install ./artilody-soundsculp_1.1.2_debian-12_amd64.deb</code></p>
+<p><code>sudo apt install ./artilody-soundsculp_1.1.3_debian-12_amd64.deb</code></p>
 <p>The program is in the application menu under <b>Sound &amp; Video</b>, or start it with <code>artilody-soundsculp</code>.
-The package is self-contained – everything the program needs (including ffmpeg for MP3, M4A and Opus) is included, nothing else has to be downloaded. Uninstall with <code>sudo apt remove artilody-soundsculp</code>.</p>
+The package is self-contained – everything the program needs is included, nothing else has to be downloaded. Uninstall with <code>sudo apt remove artilody-soundsculp</code>.</p>
 
 <div class="page-break"></div>
 <h2>3. The main window</h2>
@@ -89,7 +91,7 @@ The package is self-contained – everything the program needs (including ffmpeg
 <h2>4. Tracks: open, create and merge</h2>
 <h3>Opening audio files</h3>
 <p>Click <b>Open file</b> in the top bar or <b>Open</b> above the track list (<kbd>Ctrl+O</kbd>). You can select several files at once
-or drag files into the window. Each file becomes a new track at the bottom. Formats: WAV, AIFF, FLAC, OGG, MP3 – and with ffmpeg also M4A, Opus and more.</p>
+or drag files into the window. Each file becomes a new track at the bottom. Formats: WAV, AIFF, FLAC, Ogg Vorbis and MP3 on all systems; on macOS also M4A/AAC and CAF. Opus files cannot be opened.</p>
 <h3>Selecting a track</h3>
 <p>Click a track to select it (its header turns blue). Editing, effects and markers work on the selected track.
 Double-click the header to rename the track, click <b>×</b> to close it.</p>
@@ -213,8 +215,7 @@ Audio devices are chosen under <b>Settings → Audio settings…</b>.</p>
 <p>Click <b>Export</b> (<kbd>Ctrl+E</kbd>). In the window you choose:</p>
 <ul>
   <li><b>What to export</b>: <i>Current track</i>, <i>Selection only</i> or <i>All tracks mixed</i> (all tracks in one file – muted tracks are left out, solo tracks win).</li>
-  <li><b>Format</b>: Uncompressed (WAV 16/24/32-bit, AIFF), Lossless (FLAC 16/24, Apple Lossless) or Compressed (MP3 320/192, OGG, M4A/AAC, Opus).
-      ffmpeg for MP3, M4A and Opus is included on all systems.</li>
+  <li><b>Format</b>: WAV (16-bit, 24-bit or 32-bit float), AIFF (24-bit), FLAC (16-bit or 24-bit, lossless) or Ogg Vorbis (192 kbps, compressed).</li>
   <li><b>File name</b> and <b>Folder</b> (with <b>Choose…</b>). The file extension follows the format automatically.</li>
 </ul>
 <p>The info line shows length, sample rate, stereo/mono and the approximate file size. Volume lines are always included.
@@ -243,7 +244,7 @@ The program remembers the last format and folder. If the file exists, you are as
 <ul>
   <li><b>No sound</b>: check the output device under <b>Settings → Audio settings</b>, and that the tracks are not muted (M).</li>
   <li><b>Recording does not work</b>: choose an input device in Audio settings. On macOS allow microphone access in System Settings → Privacy &amp; Security → Microphone.</li>
-  <li><b>MP3/M4A/Opus is greyed out</b>: the bundled ffmpeg is missing – reinstall the program.</li>
+  <li><b>A file cannot be opened</b>: Opus files are not supported, and M4A/AAC files can only be opened on macOS. Convert the file to WAV or FLAC with another program first.</li>
   <li><b>macOS says the app is damaged</b>: run <code>xattr -cr "/Applications/Artilody Soundsculp.app"</code> in Terminal.</li>
 </ul>
 <p>Report bugs and wishes on GitHub under <b>Issues</b>. Artilody Soundsculp is free software under the GPL-3.0 and is built with JUCE.</p>

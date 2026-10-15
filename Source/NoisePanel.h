@@ -9,10 +9,14 @@ class SpectrumView : public juce::Component
 {
 public:
     void setSpectra (std::vector<float> original, std::vector<float> filtered);
+    void setSampleRate (double sr)            { if (sr > 0.0) { sampleRate = sr; repaint(); } }
+    void setHint (const juce::String& h)      { if (h != hint) { hint = h; repaint(); } }
     void paint (juce::Graphics&) override;
 
 private:
     std::vector<float> orig, filt;
+    double sampleRate = 44100.0;
+    juce::String hint;
 };
 
 //==============================================================================
@@ -25,7 +29,16 @@ public:
     DSP::NoiseParams getParams() const;
     bool hasLearnedProfile() const                       { return ! learnedProfile.empty(); }
     const std::vector<float>& getLearnedProfile() const  { return learnedProfile; }
-    void setLearnedProfile (std::vector<float> p);
+    double getLearnedProfileRate() const                 { return learnedRate; }
+    // True only if the switch is on, a profile exists and it was learned at the
+    // current sample rate. Use this (not hasLearnedProfile) to pick the profile.
+    bool isUsingLearnedProfile() const;
+    // sampleRate <= 0 means "the current sample rate".
+    void setLearnedProfile (std::vector<float> p, double sampleRate = 0.0);
+
+    // Sample rate of the current track (spectrum axis + learned profile check).
+    void setSampleRate (double sr);
+    double getSampleRate() const                         { return sampleRate; }
     void setNoiseOnlyPreview (bool b)                    { listenNoise.setToggleState (b, juce::dontSendNotification); }
 
     // Called by the owner with the material to analyse for the spectrum display.
@@ -39,6 +52,8 @@ public:
 private:
     void timerCallback() override;
     void scheduleUpdate()  { startTimer (250); }
+    bool learnedRateMatches() const;
+    void updateHint();
 
     SpectrumView spectrum;
     SwitchButton enableSwitch;
@@ -50,5 +65,7 @@ private:
     IconButton applyButton { "sparkle", T ("Apply", "Anvend") };
 
     std::vector<float> learnedProfile;
+    double learnedRate = 0.0;
+    double sampleRate = 44100.0;
     juce::AudioBuffer<float> material;
 };

@@ -74,7 +74,10 @@ public:
     // ----- audio
     double sampleRate = 44100.0;
     int numChannels = 2;
-    std::vector<Clip> clips;                   // sorted by start, never overlapping
+    // Never overlapping. Sorted by start after every structural edit (split, insert, join, addClip,
+    // changed(), undo/redo). moveClip() keeps indexes stable during a drag, so the order may be
+    // temporarily unsorted until the next changed().
+    std::vector<Clip> clips;
 
     // ----- annotations (seconds based, belong to the track timeline)
     std::vector<EnvelopePoint> envelope;      // sorted by time; empty == flat 1.0
@@ -91,6 +94,9 @@ public:
     juce::int64 getLength() const;             // end of the last clip
     int getNumChannels() const                 { return numChannels; }
     double getLengthSeconds() const            { return sampleRate > 0 ? (double) getLength() / sampleRate : 0.0; }
+    // Thread safe (audio thread): length cached by the message thread after every change.
+    double getCachedLengthSeconds() const noexcept { return cachedLengthSeconds.load(); }
+    void updateCachedLength();                 // message thread; called by all primitives and changed()
     bool hasSelection() const                  { return selEnd > selStart; }
     double toSeconds (juce::int64 s) const     { return (double) s / sampleRate; }
     juce::int64 toSamples (double t) const     { return (juce::int64) std::llround (t * sampleRate); }
@@ -130,7 +136,8 @@ public:
     void sortMarkers();
 
     // ----- undo: call pushUndo() *before* changing the document
-    void pushUndo (const juce::String& description);
+    // annotationsOnly = true stores only envelope, markers and selection/cursor (no clip audio).
+    void pushUndo (const juce::String& description, bool annotationsOnly = false);
     bool canUndo() const                       { return ! undoStack.empty(); }
     bool canRedo() const                       { return ! redoStack.empty(); }
     juce::String getUndoDescription() const    { return undoStack.empty() ? juce::String() : undoStack.back().description; }
@@ -156,13 +163,21 @@ private:
         std::vector<Marker> markers;
         juce::int64 selStart = 0, selEnd = 0, cursor = 0;
         juce::String description;
+        bool annotationsOnly = false;
+        size_t bytes = 0;                       // approximate memory used by the clip audio
     };
 
     std::vector<State> undoStack, redoStack;
     static constexpr size_t maxUndo = 40;
+    static constexpr size_t maxUndoBytes = (size_t) 1536 * 1024 * 1024;   // budget for full states (both stacks)
 
-    State captureState (const juce::String& desc) const;
-    void restoreState (const State&);
+    std::atomic<double> cachedLengthSeconds { 0.0 };
+
+    State captureState (const juce::String& desc, bool annotationsOnly) const;
+    void applyState (State&);                   // swaps s with the current document (cheap); s receives the old data
+    bool stepHistory (std::vector<State>& from, std::vector<State>& to);
+    void trimHistory();
+    static size_t clipBytes (const std::vector<Clip>&);
     void sortEnvelope();
     void sortClips();
     void shiftAnnotations (double fromSec, double removedUntilSec, double deltaSec);

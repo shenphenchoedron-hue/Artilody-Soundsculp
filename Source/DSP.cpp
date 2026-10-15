@@ -130,6 +130,32 @@ static inline float cubicAt (const std::vector<float>& d, double pos)
     return ((c3 * t + c2) * t + c1) * t + c0;
 }
 
+// Zero-phase low-pass (forward + backward Butterworth) used before downsampling.
+static void antiAliasLowPass (std::vector<float>& sig, int start, int num, double cutoffNormalised)
+{
+    // cutoffNormalised: cutoff / input sample rate (< 0.5)
+    constexpr double nominalRate = 100000.0;
+    auto sections = juce::dsp::FilterDesign<float>::designIIRLowpassHighOrderButterworthMethod (
+                        (float) (cutoffNormalised * nominalRate), nominalRate, 8);
+
+    auto run = [&] (bool backwards)
+    {
+        for (auto* co : sections)
+        {
+            juce::dsp::IIR::Filter<float> f (co);
+            f.reset();
+            if (! backwards)
+                for (int i = start; i < start + num; ++i)
+                    sig[(size_t) i] = f.processSample (sig[(size_t) i]);
+            else
+                for (int i = start + num; --i >= start;)
+                    sig[(size_t) i] = f.processSample (sig[(size_t) i]);
+        }
+    };
+    run (false);
+    run (true);
+}
+
 Buffer pitchShift (const Buffer& in, double semitones)
 {
     Buffer out;
@@ -188,7 +214,9 @@ Buffer pitchShift (const Buffer& in, double semitones)
                     double delta = ph - lastPhase[(size_t) b] - omega * actualHa;
                     delta -= juce::MathConstants<double>::twoPi * std::round (delta / juce::MathConstants<double>::twoPi);
                     const double trueFreq = omega + delta / actualHa;
-                    sumPhase[(size_t) b] += trueFreq * Hs;
+                    // wrapped to keep float precision when converting below (long files)
+                    sumPhase[(size_t) b] = std::remainder (sumPhase[(size_t) b] + trueFreq * Hs,
+                                                           juce::MathConstants<double>::twoPi);
                 }
                 lastPhase[(size_t) b] = ph;
                 z = std::polar ((float) mag, (float) sumPhase[(size_t) b]);
@@ -210,6 +238,10 @@ Buffer pitchShift (const Buffer& in, double semitones)
         for (size_t i = 0; i < stretched.size(); ++i)
             stretched[i] = wsum[i] > 1.0e-3f ? stretched[i] / wsum[i] : 0.0f;
 
+        // Shifting up reads the stretched signal faster (decimation): band-limit it first.
+        if (ratio > 1.0)
+            antiAliasLowPass (stretched, 0, (int) stretched.size(), 0.5 / ratio * 0.9);
+
         auto* dst = out.getWritePointer (c);
         for (int j = 0; j < inLen; ++j)
             dst[j] = cubicAt (stretched, (double) (j + N) * ratio);
@@ -220,22 +252,47 @@ Buffer pitchShift (const Buffer& in, double semitones)
 
 Buffer resample (const Buffer& in, double ratio)
 {
-    if (std::abs (ratio - 1.0) < 1.0e-9)
+    if (std::abs (ratio - 1.0) < 1.0e-9 || ratio <= 0.0 || ! std::isfinite (ratio))
     {
         Buffer copy;
         copy.makeCopyOf (in);
         return copy;
     }
 
-    const int outLen = (int) std::floor ((double) in.getNumSamples() / ratio);
-    Buffer out (in.getNumChannels(), juce::jmax (0, outLen));
+    const int inLen = in.getNumSamples();
+    const double outLenD = std::floor ((double) inLen / ratio);
+    if (outLenD > (double) std::numeric_limits<int>::max() - 16)
+    {
+        jassertfalse;
+        return Buffer (in.getNumChannels(), 0);
+    }
+    const int outLen = (int) juce::jmax (0.0, outLenD);
+    Buffer out (in.getNumChannels(), outLen);
+    if (outLen == 0)
+        return out;
+
+    // Windowed-sinc interpolation. Its latency (in input samples) is compensated by priming the
+    // interpolator with the first 'latency' samples, so output[j] corresponds to input[j * ratio].
+    const int latency = (int) std::ceil (juce::WindowedSincInterpolator::getBaseLatency());
+    const bool down = ratio > 1.0;
+    const int edge = down ? 4096 : 0;      // silence around the signal for the zero-phase filter to settle
+    const size_t srcLen = (size_t) edge + (size_t) inLen + (size_t) edge + (size_t) latency + (size_t) std::ceil (ratio) + 16;
+    std::vector<float> src;
+    std::vector<float> dummy ((size_t) juce::jmax (1, latency));
 
     for (int c = 0; c < in.getNumChannels(); ++c)
     {
-        std::vector<float> src ((size_t) in.getNumSamples() + 8, 0.0f);
-        std::copy (in.getReadPointer (c), in.getReadPointer (c) + in.getNumSamples(), src.begin());
-        juce::LagrangeInterpolator interp;
-        interp.process (ratio, src.data(), out.getWritePointer (c), outLen);
+        src.assign (srcLen, 0.0f);
+        std::copy (in.getReadPointer (c), in.getReadPointer (c) + inLen, src.begin() + edge);
+
+        if (down)   // the sinc kernel only band-limits to the input Nyquist: low-pass first
+            antiAliasLowPass (src, 0, edge + inLen + edge, 0.5 / ratio * 0.9);
+
+        juce::WindowedSincInterpolator interp;
+        const float* start = src.data() + edge;
+        if (latency > 0)
+            interp.process (1.0, start, dummy.data(), latency);     // primes exactly 'latency' samples
+        interp.process (ratio, start + latency, out.getWritePointer (c), outLen);
     }
     return out;
 }
@@ -284,34 +341,34 @@ static Coeffs::Ptr makeBandCoefficients (const EQBand& band, double sr)
     }
 }
 
+// Always returns exactly one set per band (index == band); disabled bands are pass-through.
 juce::ReferenceCountedArray<Coeffs> makeCoefficients (const EQSettings& s, double sr)
 {
+    if (sr <= 0 || ! std::isfinite (sr))
+        sr = 44100.0;
     juce::ReferenceCountedArray<Coeffs> result;
     for (auto& b : s.bands)
-        if (b.enabled)
-            result.add (makeBandCoefficients (b, sr));
+        result.add (b.enabled ? makeBandCoefficients (b, sr)
+                              : Coeffs::Ptr (new Coeffs (1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f)));
     return result;
 }
 
+// Pure filter: no gain/peak handling here (the caller applies one common anti-clip gain).
 void applyEQ (Buffer& b, double sr, const EQSettings& s)
 {
     auto coeffs = makeCoefficients (s, sr);
     for (int c = 0; c < b.getNumChannels(); ++c)
     {
         auto* d = b.getWritePointer (c);
-        for (auto* co : coeffs)
+        for (int band = 0; band < coeffs.size() && band < (int) s.bands.size(); ++band)
         {
-            juce::dsp::IIR::Filter<float> filter (co);
+            if (! s.bands[(size_t) band].enabled) continue;
+            juce::dsp::IIR::Filter<float> filter (coeffs[band]);
             filter.reset();
             for (int i = 0; i < b.getNumSamples(); ++i)
                 d[i] = filter.processSample (d[i]);
         }
     }
-
-    // keep things from clipping hard
-    auto peak = getPeak (b);
-    if (peak > 1.0f)
-        b.applyGain (0.999f / peak);
 }
 
 float bandResponseDb (const EQBand& band, double sr, float frequency)
@@ -347,18 +404,16 @@ namespace
         return w;
     }
 
-    // Mixes the buffer down to mono.
-    std::vector<float> mono (const Buffer& b)
+    // One channel as a vector.
+    std::vector<float> channel (const Buffer& b, int c)
     {
         std::vector<float> m ((size_t) b.getNumSamples(), 0.0f);
-        if (b.getNumChannels() == 0) return m;
-        for (int c = 0; c < b.getNumChannels(); ++c)
-            juce::FloatVectorOperations::add (m.data(), b.getReadPointer (c), b.getNumSamples());
-        juce::FloatVectorOperations::multiply (m.data(), 1.0f / (float) b.getNumChannels(), b.getNumSamples());
+        if (c < b.getNumChannels())
+            std::copy (b.getReadPointer (c), b.getReadPointer (c) + b.getNumSamples(), m.begin());
         return m;
     }
 
-    // Calls fn(frameMagnitudes) for frames of the mono signal (with optional stride).
+    // Calls fn(frameMagnitudes) for frames of a single-channel signal (with optional stride).
     template <typename Fn>
     void forEachFrame (const std::vector<float>& sig, int maxFrames, Fn&& fn)
     {
@@ -389,13 +444,17 @@ namespace
 
 std::vector<float> learnNoiseProfile (const Buffer& noiseOnly)
 {
+    // Averaged over the frames of every channel (not a mono mix): reduceNoise() gates each
+    // channel separately, so the profile must describe the per-channel noise level.
     std::vector<float> profile ((size_t) nBins, 0.0f);
     int count = 0;
-    forEachFrame (mono (noiseOnly), 2000, [&] (const std::vector<float>& m)
-    {
-        for (int b = 0; b < nBins; ++b) profile[(size_t) b] += m[(size_t) b];
-        ++count;
-    });
+    const int channels = juce::jmax (1, noiseOnly.getNumChannels());
+    for (int c = 0; c < channels; ++c)
+        forEachFrame (channel (noiseOnly, c), juce::jmax (1, 2000 / channels), [&] (const std::vector<float>& m)
+        {
+            for (int b = 0; b < nBins; ++b) profile[(size_t) b] += m[(size_t) b];
+            ++count;
+        });
     for (auto& v : profile) v /= (float) juce::jmax (1, count);
     return profile;
 }
@@ -403,11 +462,14 @@ std::vector<float> learnNoiseProfile (const Buffer& noiseOnly)
 std::vector<float> estimateNoiseProfile (const Buffer& material)
 {
     // Use a low percentile of each bin's magnitude as the noise floor estimate.
+    // Per-channel frames (consistent with the per-channel gate in reduceNoise()).
     std::vector<std::vector<float>> perBin ((size_t) nBins);
-    forEachFrame (mono (material), 600, [&] (const std::vector<float>& m)
-    {
-        for (int b = 0; b < nBins; ++b) perBin[(size_t) b].push_back (m[(size_t) b]);
-    });
+    const int channels = juce::jmax (1, material.getNumChannels());
+    for (int c = 0; c < channels; ++c)
+        forEachFrame (channel (material, c), juce::jmax (1, 600 / channels), [&] (const std::vector<float>& m)
+        {
+            for (int b = 0; b < nBins; ++b) perBin[(size_t) b].push_back (m[(size_t) b]);
+        });
 
     std::vector<float> profile ((size_t) nBins, 0.0f);
     for (int b = 0; b < nBins; ++b)
@@ -516,13 +578,16 @@ Buffer reduceNoise (const Buffer& in, const std::vector<float>& profile, const N
 
 std::vector<float> averageSpectrumDb (const Buffer& b, int maxFrames)
 {
+    // Per-channel average, on the same scale as the noise profiles.
     std::vector<float> avg ((size_t) nBins, 0.0f);
     int count = 0;
-    forEachFrame (mono (b), maxFrames, [&] (const std::vector<float>& m)
-    {
-        for (int i = 0; i < nBins; ++i) avg[(size_t) i] += m[(size_t) i];
-        ++count;
-    });
+    const int channels = juce::jmax (1, b.getNumChannels());
+    for (int c = 0; c < channels; ++c)
+        forEachFrame (channel (b, c), juce::jmax (1, maxFrames / channels), [&] (const std::vector<float>& m)
+        {
+            for (int i = 0; i < nBins; ++i) avg[(size_t) i] += m[(size_t) i];
+            ++count;
+        });
     const float norm = 2.0f / (float) (nN / 2);   // full-scale sine -> ~0 dB
     for (auto& v : avg)
         v = juce::Decibels::gainToDecibels (v / (float) juce::jmax (1, count) * norm, -120.0f);

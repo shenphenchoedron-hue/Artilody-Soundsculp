@@ -109,6 +109,13 @@ juce::int64 WaveformView::clampSample (double s) const
     return (juce::int64) juce::jlimit (0.0, getTotalViewSamples(), std::round (s));
 }
 
+void WaveformView::pushPendingAnnotationUndo()
+{
+    if (doc == nullptr || annotationUndoPushed) return;
+    doc->pushUndo (pendingUndoName, true);       // markers / volume line only
+    annotationUndoPushed = true;
+}
+
 float WaveformView::yForGain (float gain) const
 {
     auto r = waveArea.withTrimmedTop (clipBarHeight).toFloat().reduced (0, 12);
@@ -176,8 +183,12 @@ void WaveformView::resized()
     rulerArea = r.removeFromTop (showRuler ? rulerHeight : 0).withTrimmedLeft (gutter);
     laneArea = r.removeFromBottom (markerLaneHeight).withTrimmedLeft (gutter);
     waveArea = r.withTrimmedLeft (gutter);
-    if (waveArea.getWidth() > 0)
+    if (waveArea.getWidth() > 0 && timeline.width != waveArea.getWidth())
+    {
         timeline.width = waveArea.getWidth();
+        timeline.scrollTo (timeline.startSec);
+        if (onViewChanged) onViewChanged();      // the zoom controls depend on the width
+    }
 }
 
 void WaveformView::paint (juce::Graphics& g)
@@ -198,7 +209,8 @@ void WaveformView::paint (juce::Graphics& g)
     drawChannels (g);
     drawEnvelope (g);
     drawMarkerLane (g);
-    if (doc->muted.load())
+    const bool silenced = isSilenced ? isSilenced() : doc->muted.load();
+    if (silenced)
     {
         g.setColour (juce::Colours::black.withAlpha (0.4f));
         g.fillRect (waveArea);
@@ -594,15 +606,15 @@ void WaveformView::drawMarkerLane (juce::Graphics& g)
 void WaveformView::drawPlayhead (juce::Graphics& g)
 {
     const bool playingHere = engine.isPlaying() && (engine.getMixAll() || isCurrent);
-    const bool recordingHere = engine.isRecording() && isCurrent && doc->getLength() > 0;
+    const bool recordingHere = engine.isRecording() && engine.getRecordTarget() == doc && doc->getLength() > 0;
     if (! (playingHere || recordingHere))
         return;
 
-    double sample = engine.isRecording() ? (double) doc->getLength() : engine.getPosition() * doc->sampleRate;
+    double sample = recordingHere ? (double) doc->getLength() : engine.getPosition() * doc->sampleRate;
     auto x = xForSample (sample);
     if (x < (float) waveArea.getX() || x > (float) waveArea.getRight()) return;
 
-    g.setColour (engine.isRecording() ? Theme::record : Theme::playhead);
+    g.setColour (recordingHere ? Theme::record : Theme::playhead);
     g.fillRect (juce::Rectangle<float> (x - 1.0f, (float) rulerArea.getY(), 2.0f, (float) (laneArea.getBottom() - rulerArea.getY())));
     juce::Path tri;
     tri.addTriangle (x - 6, (float) rulerArea.getY(), x + 6, (float) rulerArea.getY(), x, (float) rulerArea.getY() + 8);
@@ -673,6 +685,7 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
     if (onActivate) onActivate();
     drag = Drag::none;
     dragMoved = false;
+    annotationUndoPushed = false;
     mouseDownPos = e.getPosition();
     const auto p = e.position;
     const auto sample = clampSample (sampleForX (p.x));
@@ -686,15 +699,19 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
             if (idx >= 0) showMarkerMenu (idx);
             return;
         }
+        if (editsBlocked())
+            return;
         if (idx >= 0)
         {
-            doc->pushUndo (T ("Move marker", "Flyt markør"));
+            // undo is pushed when the marker actually moves (a plain click changes nothing)
             drag = Drag::marker;
             dragIndex = idx;
+            annotationUndoPushed = false;
+            pendingUndoName = T ("Move marker", "Flyt markør");
         }
         else
         {
-            doc->pushUndo (T ("Add marker", "Tilføj markør"));
+            doc->pushUndo (T ("Add marker", "Tilføj markør"), true);
             int newIdx = doc->addMarker ((double) sample / doc->sampleRate);
             doc->annotationsChanged();
             if (onMarkersChanged) onMarkersChanged (newIdx);
@@ -720,9 +737,11 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
     int envIdx = findEnvelopePointAt (p);
     if (envIdx >= 0)
     {
+        if (editsBlocked())
+            return;
         if (e.mods.isPopupMenu())
         {
-            doc->pushUndo (T ("Delete volume point", "Slet volumenpunkt"));
+            doc->pushUndo (T ("Delete volume point", "Slet volumenpunkt"), true);
             doc->removeEnvelopePoint (envIdx);
             hoverEnvelope = -1;
             doc->annotationsChanged();
@@ -730,9 +749,11 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
             repaint();
             return;
         }
-        doc->pushUndo (T ("Volume envelope", "Volumenkurve"));
+        // undo is pushed when the point actually moves (a plain click changes nothing)
         drag = Drag::envelopePoint;
         dragIndex = envIdx;
+        annotationUndoPushed = false;
+        pendingUndoName = T ("Volume envelope", "Volumenkurve");
         return;
     }
 
@@ -741,8 +762,8 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
     if (clipIdx >= 0 && ! e.mods.isPopupMenu())
     {
         auto& c = doc->clips[(size_t) clipIdx];
-        drag = Drag::clip;
-        dragIndex = clipIdx;
+        drag = editsBlocked() ? Drag::none : Drag::clip;     // while recording a click only selects the clip
+        dragIndex = editsBlocked() ? -1 : clipIdx;
         dragClipOffset = sample - c.start;
         clipUndoPushed = false;
         doc->selStart = c.start;
@@ -761,9 +782,12 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
 
     if (tool == Tool::volume && e.mods.isLeftButtonDown())
     {
-        doc->pushUndo (T ("Add volume point", "Tilføj volumenpunkt"));
+        if (editsBlocked())
+            return;
+        doc->pushUndo (T ("Add volume point", "Tilføj volumenpunkt"), true);
         dragIndex = doc->addEnvelopePoint ((double) juce::jmin (sample, doc->getLength()) / doc->sampleRate, gainForY (p.y));
-        drag = Drag::envelopePoint;
+        drag = dragIndex >= 0 ? Drag::envelopePoint : Drag::none;
+        annotationUndoPushed = true;                 // the drag continues the same undo step
         doc->annotationsChanged();
         if (onEnvelopeEdited) onEnvelopeEdited();
         repaint();
@@ -833,14 +857,18 @@ void WaveformView::mouseDrag (const juce::MouseEvent& e)
             if (sample < doc->selStart) { doc->selEnd = doc->selStart; doc->selStart = sample; drag = Drag::selStartEdge; }
             break;
         case Drag::envelopePoint:
+            // the point may have disappeared (undo during the drag) and edits stop while recording
+            if (editsBlocked() || ! juce::isPositiveAndBelow (dragIndex, (int) doc->envelope.size())) return;
+            pushPendingAnnotationUndo();
             doc->moveEnvelopePoint (dragIndex, (double) sample / doc->sampleRate, gainForY (p.y));
             if (onEnvelopeEdited) onEnvelopeEdited();
             repaint();
             return;
         case Drag::marker:
-            if (juce::isPositiveAndBelow (dragIndex, (int) doc->markers.size()))
+            if (! editsBlocked() && juce::isPositiveAndBelow (dragIndex, (int) doc->markers.size()))
             {
-                doc->markers[(size_t) dragIndex].time = (double) sample / doc->sampleRate;
+                pushPendingAnnotationUndo();
+                doc->markers[(size_t) dragIndex].time = juce::jlimit (0.0, doc->getLengthSeconds(), (double) sample / doc->sampleRate);
                 if (onMarkersChanged) onMarkersChanged (-1);
             }
             repaint();
@@ -850,7 +878,7 @@ void WaveformView::mouseDrag (const juce::MouseEvent& e)
             break;
         case Drag::clip:
         {
-            if (! juce::isPositiveAndBelow (dragIndex, (int) doc->clips.size())) return;
+            if (editsBlocked() || ! juce::isPositiveAndBelow (dragIndex, (int) doc->clips.size())) return;
             if (! clipUndoPushed)
             {
                 doc->pushUndo (T ("Move clip", "Flyt klip"));
@@ -889,18 +917,26 @@ void WaveformView::mouseUp (const juce::MouseEvent& e)
     }
     else if (drag == Drag::marker)
     {
-        // keep markers sorted but remember which one was dragged
-        auto m = doc->markers[(size_t) dragIndex];
-        doc->sortMarkers();
-        int idx = 0;
-        for (int i = 0; i < (int) doc->markers.size(); ++i)
-            if (doc->markers[(size_t) i].time == m.time && doc->markers[(size_t) i].name == m.name) idx = i;
-        doc->annotationsChanged();
-        if (onMarkersChanged) onMarkersChanged (dragMoved ? -1 : idx);
+        // the marker may be gone if undo happened during the drag
+        if (juce::isPositiveAndBelow (dragIndex, (int) doc->markers.size()))
+        {
+            // keep markers sorted but remember which one was dragged
+            auto m = doc->markers[(size_t) dragIndex];
+            int idx = dragIndex;
+            if (annotationUndoPushed)
+            {
+                doc->sortMarkers();
+                for (int i = 0; i < (int) doc->markers.size(); ++i)
+                    if (doc->markers[(size_t) i].time == m.time && doc->markers[(size_t) i].name == m.name) idx = i;
+                doc->annotationsChanged();          // only when something actually changed
+            }
+            if (onMarkersChanged) onMarkersChanged (annotationUndoPushed ? -1 : idx);
+        }
     }
     else if (drag == Drag::envelopePoint)
     {
-        doc->annotationsChanged();
+        if (annotationUndoPushed)
+            doc->annotationsChanged();
     }
     else if (drag == Drag::clip)
     {
@@ -936,9 +972,9 @@ void WaveformView::mouseDoubleClick (const juce::MouseEvent& e)
     if (! waveArea.contains (e.getPosition()) || tool == Tool::volume)
         return;
 
-    if (isNearEnvelopeLine (p) && findEnvelopePointAt (p) < 0)
+    if (isNearEnvelopeLine (p) && findEnvelopePointAt (p) < 0 && ! editsBlocked())
     {
-        doc->pushUndo (T ("Add volume point", "Tilføj volumenpunkt"));
+        doc->pushUndo (T ("Add volume point", "Tilføj volumenpunkt"), true);
         doc->addEnvelopePoint (sampleForX (p.x) / doc->sampleRate, doc->gainAt (sampleForX (p.x) / doc->sampleRate));
         doc->annotationsChanged();
         if (onEnvelopeEdited) onEnvelopeEdited();
@@ -1006,14 +1042,27 @@ void WaveformView::showMarkerMenu (int index)
             d->cursor = d->selStart;
             if (safe->onSelectionChanged) safe->onSelectionChanged();
         }
+        else if ((r == 3 || r == 4) && safe->editsBlocked())
+        {
+            return;
+        }
         else if (r == 4)
         {
-            d->pushUndo (T ("Marker colour", "Markørfarve"));
             auto flagX = (int) safe->xForSample (d->markers[(size_t) index].time * d->sampleRate);
             auto area = juce::Rectangle<int> (flagX, safe->laneArea.getY(), 24, safe->laneArea.getHeight());
-            showColourPicker (safe->localAreaToGlobal (area), d->markers[(size_t) index].colour, [safe, d, index] (juce::Colour c)
+            // undo is pushed on the first real colour change, so a cancelled picker leaves no entry
+            auto undoPushed = std::make_shared<bool> (false);
+            showColourPicker (safe->localAreaToGlobal (area), d->markers[(size_t) index].colour, [safe, d, index, undoPushed] (juce::Colour c)
             {
-                if (safe == nullptr || ! juce::isPositiveAndBelow (index, (int) d->markers.size())) return;
+                // the view may show another track by now, or the document may be gone
+                if (safe == nullptr || safe->doc != d || safe->editsBlocked()
+                    || ! juce::isPositiveAndBelow (index, (int) d->markers.size())) return;
+                if (d->markers[(size_t) index].colour == c) return;
+                if (! *undoPushed)
+                {
+                    d->pushUndo (T ("Marker colour", "Markørfarve"), true);
+                    *undoPushed = true;
+                }
                 d->markers[(size_t) index].colour = c;
                 d->annotationsChanged();
                 if (safe->onMarkersChanged) safe->onMarkersChanged (-1);
@@ -1022,7 +1071,7 @@ void WaveformView::showMarkerMenu (int index)
         }
         else if (r == 3)
         {
-            d->pushUndo (T ("Delete marker", "Slet markør"));
+            d->pushUndo (T ("Delete marker", "Slet markør"), true);
             d->markers.erase (d->markers.begin() + index);
             d->annotationsChanged();
             if (safe->onMarkersChanged) safe->onMarkersChanged (-1);

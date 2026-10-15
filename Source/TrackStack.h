@@ -45,6 +45,7 @@ public:
     void paintOverChildren (juce::Graphics&) override;
 
     std::function<void()> onSelect, onClose, onRename;
+    std::function<void()> onMixChanged;           // mute / solo toggled (other lanes may change dimming)
     static constexpr int headerHeight = 28;
 
 private:
@@ -111,6 +112,7 @@ private:
     void layoutLanes();
     void wireView (TrackLane& lane);
     int indexOf (const TrackLane* lane) const;
+    bool isSilenced (const AudioDocument* doc) const;  // same rule as the playback engine
     juce::Rectangle<int> barArea, rulerArea;
 
 public:

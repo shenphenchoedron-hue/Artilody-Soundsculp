@@ -1,2 +1,6 @@
 #!/bin/sh
-exec /usr/lib/artilody-soundsculp/artilody-soundsculp "$@"
+# Launcher installed to <prefix>/bin; the real binary lives in
+# <prefix>/lib/artilody-soundsculp. Resolve relative to this script so
+# the package also works when installed or extracted to another prefix.
+here=$(dirname "$(readlink -f "$0")")
+exec "$here/../lib/artilody-soundsculp/artilody-soundsculp" "$@"

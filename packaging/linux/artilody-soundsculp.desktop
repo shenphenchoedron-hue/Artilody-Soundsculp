@@ -8,5 +8,7 @@ Comment[da]=Simpel lydredigerings-app
 Exec=artilody-soundsculp %F
 Icon=com.artilody.soundsculp
 Terminal=false
+# JUCE sets WM_CLASS (res_name/res_class) to JUCEApplication::getApplicationName()
+StartupWMClass=Artilody Soundsculp
 Categories=AudioVideo;Audio;AudioVideoEditing;
-MimeType=audio/x-wav;audio/wav;audio/flac;audio/x-flac;audio/ogg;audio/mpeg;audio/x-aiff;audio/mp4;
+MimeType=audio/x-wav;audio/wav;audio/flac;audio/x-flac;audio/ogg;audio/x-vorbis+ogg;audio/vorbis;audio/mpeg;audio/x-aiff;audio/aiff;

@@ -77,6 +77,7 @@ public:
             mc->loadDemoContent();
             juce::Timer::callAfterDelay (1500, [this, target]
             {
+                if (mainWindow == nullptr || mainWindow->getMain() == nullptr) { quit(); return; }
                 auto* mc2 = mainWindow->getMain();
                 auto img = mc2->createComponentSnapshot (mc2->getLocalBounds(), true, 1.0f);
                 target.deleteFile();
@@ -103,20 +104,35 @@ public:
     void shutdown() override
     {
         if (mainWindow != nullptr)
-            mainWindow->getMain()->saveSettings();
+            if (auto* mc = mainWindow->getMain())
+                mc->saveSettings();
+
+        // Close open dialogs (audio settings, export, merge ...) before the main component and
+        // its audio engine go away. cancelAllModalComponents() only ends the modal state, so the
+        // dialogs that are not deleted on exit are deleted by MainComponent's destructor.
+        if (auto* mcm = juce::ModalComponentManager::getInstanceWithoutCreating())
+            mcm->cancelAllModalComponents();
+
         mainWindow = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     }
 
     void systemRequestedQuit() override
     {
-        if (mainWindow != nullptr && mainWindow->getMain()->hasUnsavedChanges())
+        if (mainWindow != nullptr && mainWindow->getMain() != nullptr && mainWindow->getMain()->hasUnsavedChanges())
         {
+            if (quitConfirmationOpen)
+                return;                        // the question is already on screen
+            quitConfirmationOpen = true;
             juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Artilody Soundsculp",
                                                 T ("Some tracks have changes that are not exported. Quit anyway?",
                                                    "Nogle spor har ændringer der ikke er eksporteret. Vil du afslutte alligevel?"),
                                                 T ("Quit", "Afslut"), T ("Cancel", "Annuller"), nullptr,
-                                                juce::ModalCallbackFunction::create ([] (int r) { if (r == 1) juce::JUCEApplication::quit(); }));
+                                                juce::ModalCallbackFunction::create ([this] (int r)
+                                                {
+                                                    quitConfirmationOpen = false;
+                                                    if (r == 1) juce::JUCEApplication::quit();
+                                                }));
             return;
         }
         quit();
@@ -168,6 +184,7 @@ private:
     juce::ApplicationProperties properties;
     SoundsculpLookAndFeel lookAndFeel;
     std::unique_ptr<MainWindow> mainWindow;
+    bool quitConfirmationOpen = false;
 };
 
 START_JUCE_APPLICATION (SoundsculpApplication)

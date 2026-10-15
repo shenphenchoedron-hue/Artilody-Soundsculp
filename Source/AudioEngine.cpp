@@ -35,6 +35,7 @@ void AudioEngine::play()
 {
     previewing = false;
     reachedEnd = false;
+    eqResetPending = true;     // no filter tail from the previous playback
     playing = true;
     if (onTransportChanged) onTransportChanged();
 }
@@ -48,7 +49,8 @@ void AudioEngine::stop()
 
 void AudioEngine::setLoopRange (double s, double e)
 {
-    loopStart = juce::jmax (0.0, s);
+    s = juce::jmax (0.0, s);
+    loopStart = s;
     loopEnd = juce::jmax (s, e);
 }
 
@@ -57,25 +59,27 @@ void AudioEngine::playPreview (juce::AudioBuffer<float>&& buffer, double sampleR
     playing = false;
     {
         const juce::ScopedLock sl (docsLock);
-        previewBuffer = std::move (buffer);
-        previewRate = sampleRate;
+        std::swap (previewBuffer, buffer);     // the old preview is freed outside the lock
+        previewRate = sampleRate > 0 ? sampleRate : 44100.0;
         previewPos = 0.0;
     }
+    { auto old = std::move (buffer); }
     previewing = true;
     if (onTransportChanged) onTransportChanged();
 }
 
 double AudioEngine::getEndTime() const
 {
+    // Audio thread: only cached (atomic) lengths, never the clip vectors.
     double end = 0.0;
     if (mixAll)
     {
         for (auto* d : documents)
-            end = juce::jmax (end, d->getLengthSeconds());
+            end = juce::jmax (end, d->getCachedLengthSeconds());
     }
     else if (current != nullptr)
     {
-        end = current->getLengthSeconds();
+        end = current->getCachedLengthSeconds();
     }
     return end;
 }
@@ -90,13 +94,28 @@ int AudioEngine::getNumInputChannels() const
 //==============================================================================
 void AudioEngine::setEQ (const EQSettings& settings, bool enabled)
 {
-    auto coeffs = DSP::makeCoefficients (settings, deviceRate.load());
+    const auto rate = deviceRate.load();
+    auto coeffs = DSP::makeCoefficients (settings, rate > 0 ? rate : 44100.0);
+
+    std::array<Biquad, 4> plain {};
+    for (int b = 0; b < (int) plain.size() && b < coeffs.size(); ++b)
+    {
+        if (! settings.bands[(size_t) b].enabled || coeffs[b] == nullptr)
+            continue;
+        const auto& raw = coeffs[b]->coefficients;     // b0 b1 b2 a1 a2 (normalised)
+        if (raw.size() < 5)
+            continue;
+        plain[(size_t) b] = { raw[0], raw[1], raw[2], raw[3], raw[4], true };
+    }
+
     {
         const juce::SpinLock::ScopedLockType sl (eqLock);
         eqSettings = settings;
-        pendingCoeffs = coeffs;
+        pendingCoeffs = plain;
         eqDirty = true;
     }
+    if (enabled && ! eqEnabled.load())
+        eqResetPending = true;
     eqEnabled = enabled;
 }
 
@@ -113,6 +132,12 @@ void AudioEngine::rebuildEQ()
 //==============================================================================
 bool AudioEngine::startRecording (AudioDocument* target, juce::String& error)
 {
+    if (target == nullptr)
+    {
+        error = T ("There is no track to record into.", "Der er ikke noget spor at optage i.");
+        return false;
+    }
+
     auto* dev = deviceManager.getCurrentAudioDevice();
     if (dev == nullptr)
     {
@@ -128,60 +153,133 @@ bool AudioEngine::startRecording (AudioDocument* target, juce::String& error)
         return false;
     }
 
+    if (recording.load())
+        stopRecording();
+
     stop();
     recordChannels = juce::jlimit (1, 2, ins);
     recordTarget = target;
     recordedSamples = 0;
+    recordOverflow = false;
     recordData.assign ((size_t) recordChannels, {});
     for (auto& v : recordData) v.reserve ((size_t) (deviceRate.load() * 60.0));
     recordPointers.assign ((size_t) recordChannels, nullptr);
     recordFifo.reset();
 
+    std::vector<Clip> oldClips;
     {
         const juce::ScopedLock sl (target->lock);
         target->sampleRate = deviceRate.load();
         target->numChannels = recordChannels;
-        target->clips.clear();
+        target->clips.swap (oldClips);
         Clip c;
         c.start = 0;
         c.name = target->name;
         c.audio.setSize (recordChannels, 0);
         target->clips.push_back (std::move (c));
     }
+    oldClips.clear();
+    target->updateCachedLength();
 
     recording = true;
     if (onTransportChanged) onTransportChanged();
     return true;
 }
 
-void AudioEngine::stopRecording()
+AudioDocument* AudioEngine::stopRecording()
 {
     if (! recording.load())
-        return;
+        return nullptr;
 
     recording = false;
-    timerCallback();   // drain remaining audio
 
-    if (recordTarget != nullptr)
+    // A callback that saw recording == true may still be writing into the FIFO: wait for it.
+    for (int i = 0; i < 500 && callbackActive.load(); ++i)
+        juce::Thread::sleep (1);
+
+    drainRecordFifo();   // the remaining audio
+
+    auto* target = recordTarget;
+    if (target != nullptr)
     {
         juce::AudioBuffer<float> owned (recordChannels, (int) recordedSamples);
         for (int c = 0; c < recordChannels; ++c)
             if (recordedSamples > 0)
                 owned.copyFrom (c, 0, recordData[(size_t) c].data(), (int) recordedSamples);
 
+        std::vector<Clip> oldClips;
         {
-            const juce::ScopedLock sl (recordTarget->lock);
-            if (recordedSamples > 0 && ! recordTarget->clips.empty())
-                recordTarget->clips[0].audio = std::move (owned);
+            const juce::ScopedLock sl (target->lock);
+            if (recordedSamples > 0 && ! target->clips.empty())
+                std::swap (target->clips[0].audio, owned);
             else
-                recordTarget->clips.clear();
+                target->clips.swap (oldClips);
         }
-        recordTarget->changed();
+        target->changed();
     }
 
     recordTarget = nullptr;
     recordData.clear();
+    recordPointers.clear();
     if (onTransportChanged) onTransportChanged();
+    return target;
+}
+
+void AudioEngine::drainRecordFifo()
+{
+    if (recordTarget == nullptr)
+        return;
+
+    const int ready = recordFifo.getNumReady();
+    if (ready <= 0)
+        return;
+
+    const auto oldLen = recordedSamples;
+    const auto room = juce::jmax<juce::int64> (0, maxRecordSamples - oldLen);
+    const int toKeep = (int) juce::jmin<juce::int64> (ready, room);
+    if (toKeep < ready)
+        recordOverflow = true;   // length limit reached - the rest is dropped
+    const auto newLen = oldLen + toKeep;
+
+    int start1, size1, start2, size2;
+    recordFifo.prepareToRead (ready, start1, size1, start2, size2);
+
+    bool haveClip = false;
+    if (toKeep > 0)
+    {
+        // The record clip refers to recordData, so grow it under the document lock.
+        const juce::ScopedLock sl (recordTarget->lock);
+        for (auto& v : recordData)
+        {
+            if ((size_t) newLen > v.capacity())
+                v.reserve (juce::jmax ((size_t) newLen, v.capacity() * 2));
+            v.resize ((size_t) newLen);
+        }
+
+        const int n1 = juce::jmin (size1, toKeep);
+        const int n2 = juce::jmin (size2, toKeep - n1);
+        for (int c = 0; c < recordChannels; ++c)
+        {
+            auto* dst = recordData[(size_t) c].data() + oldLen;
+            if (n1 > 0) std::copy (recordFifoBuffer.getReadPointer (c, start1), recordFifoBuffer.getReadPointer (c, start1) + n1, dst);
+            if (n2 > 0) std::copy (recordFifoBuffer.getReadPointer (c, start2), recordFifoBuffer.getReadPointer (c, start2) + n2, dst + n1);
+            recordPointers[(size_t) c] = recordData[(size_t) c].data();
+        }
+
+        haveClip = ! recordTarget->clips.empty();
+        if (haveClip)
+            recordTarget->clips[0].audio.setDataToReferTo (recordPointers.data(), recordChannels, (int) newLen);
+    }
+    recordFifo.finishedRead (size1 + size2);
+    recordedSamples = newLen;
+
+    if (haveClip)
+    {
+        recordTarget->clips[0].rebuildPeaks (oldLen);
+        recordTarget->updateCachedLength();
+        recordTarget->cursor = recordedSamples;
+        recordTarget->sendChangeMessage();
+    }
 }
 
 void AudioEngine::timerCallback()
@@ -189,60 +287,19 @@ void AudioEngine::timerCallback()
     if (reachedEnd.exchange (false))
         if (onTransportChanged) onTransportChanged();
 
-    if (recordTarget == nullptr)
-        return;
-
-    int ready = recordFifo.getNumReady();
-    if (ready <= 0)
-        return;
-
-    const auto oldLen = recordedSamples;
-    const auto newLen = oldLen + ready;
-    bool reallocated = false;
-
-    for (auto& v : recordData)
-    {
-        if ((size_t) newLen > v.capacity())
-        {
-            v.reserve (juce::jmax ((size_t) newLen, v.capacity() * 2));
-            reallocated = true;
-        }
-        v.resize ((size_t) newLen);
-    }
-
-    int start1, size1, start2, size2;
-    recordFifo.prepareToRead (ready, start1, size1, start2, size2);
-    for (int c = 0; c < recordChannels; ++c)
-    {
-        auto* dst = recordData[(size_t) c].data() + oldLen;
-        if (size1 > 0) std::copy (recordFifoBuffer.getReadPointer (c, start1), recordFifoBuffer.getReadPointer (c, start1) + size1, dst);
-        if (size2 > 0) std::copy (recordFifoBuffer.getReadPointer (c, start2), recordFifoBuffer.getReadPointer (c, start2) + size2, dst + size1);
-    }
-    recordFifo.finishedRead (size1 + size2);
-    recordedSamples = newLen;
-    juce::ignoreUnused (reallocated);
-
-    for (int c = 0; c < recordChannels; ++c)
-        recordPointers[(size_t) c] = recordData[(size_t) c].data();
-
-    {
-        const juce::ScopedLock sl (recordTarget->lock);
-        if (recordTarget->clips.empty()) return;
-        recordTarget->clips[0].audio.setDataToReferTo (recordPointers.data(), recordChannels, (int) recordedSamples);
-    }
-    recordTarget->clips[0].rebuildPeaks (oldLen);
-    recordTarget->cursor = recordedSamples;
-    recordTarget->sendChangeMessage();
+    drainRecordFifo();
 }
 
 //==============================================================================
 void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
-    deviceRate = device->getCurrentSampleRate();
-    auto block = device->getCurrentBufferSizeSamples();
-    mixBuffer.setSize (2, juce::jmax (block, 4096));
-    chunkBuffer.setSize (2, juce::jmax (block, 4096));
-    for (auto& ch : eqFilters) for (auto& f : ch) f.reset();
+    const auto rate = device->getCurrentSampleRate();
+    deviceRate = rate > 0 ? rate : 44100.0;
+    const int block = juce::jmax (device->getCurrentBufferSizeSamples(), 4096);
+    mixBuffer.setSize (2, block);
+    chunkBuffer.setSize (2, block);
+    gainScratch.assign ((size_t) block, 1.0f);
+    eqResetPending = true;
     rebuildEQ();
 }
 
@@ -258,12 +315,38 @@ void AudioEngine::renderDocument (AudioDocument& doc, double startTime, int numS
     if (! tl.isLocked())
         return;
 
-    const double ratio = doc.sampleRate / deviceRate.load();
+    const double rate = deviceRate.load();
+    if (doc.sampleRate <= 0 || rate <= 0 || numSamples <= 0)
+        return;
+
+    const double ratio = doc.sampleRate / rate;
     const double startPos = startTime * doc.sampleRate;
 
-    // envelope gains at chunk edges, linearly interpolated in between
-    const float g0 = doc.gainAt (startTime);
-    const float g1 = doc.gainAt (startTime + numSamples / deviceRate.load());
+    // Envelope gains per output sample (evaluated every 32 samples and interpolated, like
+    // AudioDocument::fillGains() used by export). gainScratch is preallocated.
+    const float* gains = nullptr;
+    float flatGain = 1.0f;
+    if (! doc.envelope.empty())
+    {
+        if ((int) gainScratch.size() >= numSamples)
+        {
+            constexpr int step = 32;
+            float prev = doc.gainAt (startTime);
+            for (int i = 0; i < numSamples; i += step)
+            {
+                const int n = juce::jmin (step, numSamples - i);
+                const float next = doc.gainAt (startTime + (double) (i + n) / rate);
+                for (int k = 0; k < n; ++k)
+                    gainScratch[(size_t) (i + k)] = prev + (next - prev) * (float) k / (float) n;
+                prev = next;
+            }
+            gains = gainScratch.data();
+        }
+        else
+        {
+            flatGain = doc.gainAt (startTime);
+        }
+    }
 
     for (auto& clip : doc.clips)
     {
@@ -271,12 +354,10 @@ void AudioEngine::renderDocument (AudioDocument& doc, double startTime, int numS
         const int chans = clip.audio.getNumChannels();
         if (len == 0 || chans == 0) continue;
 
-        // output range where this clip is active
+        // output range where this clip is active (computed in double, clamped before casting)
         const double rel0 = startPos - (double) clip.start;           // clip position at output sample 0
-        int i0 = (int) std::ceil (-rel0 / ratio);
-        int i1 = (int) std::ceil (((double) len - rel0) / ratio);
-        i0 = juce::jlimit (0, numSamples, i0);
-        i1 = juce::jlimit (0, numSamples, i1);
+        const int i0 = (int) juce::jlimit (0.0, (double) numSamples, std::ceil (-rel0 / ratio));
+        const int i1 = (int) juce::jlimit (0.0, (double) numSamples, std::ceil (((double) len - rel0) / ratio));
         if (i1 <= i0) continue;
 
         for (int oc = 0; oc < dest.getNumChannels(); ++oc)
@@ -291,7 +372,7 @@ void AudioEngine::renderDocument (AudioDocument& doc, double startTime, int numS
                 const float frac = (float) (p - (double) idx);
                 const float a = src[idx];
                 const float b = idx + 1 < len ? src[idx + 1] : a;
-                const float g = g0 + (g1 - g0) * ((float) i / (float) numSamples);
+                const float g = gains != nullptr ? gains[i] : flatGain;
                 out[i] += (a + (b - a) * frac) * g;
             }
         }
@@ -302,34 +383,62 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
                                                     float* const* outputs, int numOuts, int numSamples,
                                                     const juce::AudioIODeviceCallbackContext&)
 {
+    juce::ScopedNoDenormals noDenormals;
+    callbackActive = true;
+
     for (int c = 0; c < numOuts; ++c)
         if (outputs[c] != nullptr)
             juce::FloatVectorOperations::clear (outputs[c], numSamples);
 
     // ---- recording
-    if (recording.load() && numIns > 0)
+    if (recording.load())
     {
-        int s1, n1, s2, n2;
-        recordFifo.prepareToWrite (numSamples, s1, n1, s2, n2);
-        for (int c = 0; c < recordChannels; ++c)
-        {
-            const float* in = inputs[juce::jmin (c, numIns - 1)];
-            if (in == nullptr) continue;
-            if (n1 > 0) recordFifoBuffer.copyFrom (c, s1, in, n1);
-            if (n2 > 0) recordFifoBuffer.copyFrom (c, s2, in + n1, n2);
-        }
-        recordFifo.finishedWrite (n1 + n2);
-
         float peak = 0.0f;
-        for (int i = 0; i < numSamples; ++i)
-            if (inputs[0] != nullptr) peak = juce::jmax (peak, std::abs (inputs[0][i]));
+        if (numIns > 0 && inputs != nullptr)
+        {
+            int s1, n1, s2, n2;
+            recordFifo.prepareToWrite (numSamples, s1, n1, s2, n2);
+            if (n1 + n2 < numSamples)
+                recordOverflow = true;   // the message thread did not keep up - audio is lost
+            for (int c = 0; c < recordChannels; ++c)
+            {
+                const float* in = inputs[juce::jmin (c, numIns - 1)];
+                if (in == nullptr)
+                {
+                    if (n1 > 0) recordFifoBuffer.clear (c, s1, n1);
+                    if (n2 > 0) recordFifoBuffer.clear (c, s2, n2);
+                    continue;
+                }
+                if (n1 > 0) recordFifoBuffer.copyFrom (c, s1, in, n1);
+                if (n2 > 0) recordFifoBuffer.copyFrom (c, s2, in + n1, n2);
+            }
+            recordFifo.finishedWrite (n1 + n2);
+
+            if (inputs[0] != nullptr)
+            {
+                const auto r = juce::FloatVectorOperations::findMinAndMax (inputs[0], numSamples);
+                peak = juce::jmax (-r.getStart(), r.getEnd());
+            }
+        }
         levels[0] = peak; levels[1] = peak;
+        callbackActive = false;
         return;
     }
 
-    if (mixBuffer.getNumSamples() < numSamples)
-        return;   // should not happen; avoid allocating on the audio thread
+    // ---- playback, in sub-blocks that fit the preallocated buffers
+    float peaks[2] = { 0.0f, 0.0f };
+    const int maxBlock = juce::jmin (mixBuffer.getNumSamples(), chunkBuffer.getNumSamples());
+    if (maxBlock > 0)
+        for (int offset = 0; offset < numSamples; offset += maxBlock)
+            processBlock (outputs, numOuts, offset, juce::jmin (maxBlock, numSamples - offset), peaks);
 
+    levels[0] = peaks[0];
+    levels[1] = peaks[1];
+    callbackActive = false;
+}
+
+void AudioEngine::processBlock (float* const* outputs, int numOuts, int offset, int numSamples, float* peaks)
+{
     const juce::ScopedTryLock tl (docsLock);
     if (! tl.isLocked())
         return;
@@ -338,6 +447,8 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
     mix.clear();
 
     const double rate = deviceRate.load();
+    if (rate <= 0)
+        return;
 
     // ---- preview
     if (previewing.load())
@@ -359,8 +470,8 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
             }
         }
         pos += numSamples * ratio;
-        previewPos = pos / previewRate;
-        if (pos >= (double) len)
+        previewPos = previewRate > 0 ? pos / previewRate : 0.0;
+        if (pos >= (double) len || previewRate <= 0)
         {
             previewing = false;
             reachedEnd = true;
@@ -371,6 +482,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
     {
         const double end = getEndTime();
         double t = position.load();
+        const double seek = pendingSeek.exchange (-1.0);
+        if (seek >= 0.0)
+            t = seek;
+
         int done = 0;
         const bool loopOn = looping.load() && loopEnd.load() > loopStart.load() + 0.001;
 
@@ -378,7 +493,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
         {
             int todo = numSamples - done;
             const double limit = loopOn ? loopEnd.load() : end;
-            const int untilLimit = (int) std::ceil ((limit - t) * rate);
+            // computed and clamped in double before converting (no overflow for long audio)
+            const double remaining = std::ceil ((limit - t) * rate);
+            const int untilLimit = remaining >= (double) todo ? todo : (int) juce::jmax (0.0, remaining);
 
             if (untilLimit <= 0)
             {
@@ -411,39 +528,56 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
             done += todo;
             t += todo / rate;
         }
-        position = t;
+        if (pendingSeek.load() < 0.0)   // a seek that arrived meanwhile wins
+            position = t;
 
-        // real-time EQ
-        if (eqEnabled.load())
+        // real-time EQ (no allocation: plain coefficients copied under a try-lock)
+        const bool eqOn = eqEnabled.load();
+        if (eqOn)
         {
-            const juce::SpinLock::ScopedTryLockType sl (eqLock);
-            if (sl.isLocked() && eqDirty)
+            const bool resetAll = eqResetPending.exchange (false) || ! eqWasEnabled;
             {
-                activeCoeffs = pendingCoeffs;
-                eqDirty = false;
-                for (auto& ch : eqFilters)
-                    for (int b = 0; b < (int) ch.size(); ++b)
-                        if (b < activeCoeffs.size())
-                            ch[(size_t) b].coefficients = activeCoeffs[b];
+                const juce::SpinLock::ScopedTryLockType sl (eqLock);
+                if (sl.isLocked() && eqDirty)
+                {
+                    for (size_t b = 0; b < activeCoeffs.size(); ++b)
+                        if (pendingCoeffs[b].active && ! activeCoeffs[b].active)
+                            for (auto& ch : eqState) ch[b] = {};    // band switched on: start clean
+                    activeCoeffs = pendingCoeffs;
+                    eqDirty = false;
+                }
             }
+            if (resetAll)
+                for (auto& ch : eqState) for (auto& st : ch) st = {};
 
-            for (int c = 0; c < 2 && c < (int) eqFilters.size(); ++c)
+            for (int c = 0; c < 2; ++c)
             {
                 auto* d = mix.getWritePointer (c);
-                for (int b = 0; b < activeCoeffs.size(); ++b)
+                for (size_t b = 0; b < activeCoeffs.size(); ++b)
                 {
-                    auto& f = eqFilters[(size_t) c][(size_t) b];
+                    const auto& k = activeCoeffs[b];
+                    if (! k.active) continue;
+                    auto& st = eqState[(size_t) c][b];
+                    float z1 = st.z1, z2 = st.z2;
                     for (int i = 0; i < numSamples; ++i)
-                        d[i] = f.processSample (d[i]);
+                    {
+                        const float x = d[i];
+                        const float y = k.b0 * x + z1;
+                        z1 = k.b1 * x - k.a1 * y + z2;
+                        z2 = k.b2 * x - k.a2 * y;
+                        d[i] = y;
+                    }
+                    st.z1 = z1; st.z2 = z2;
                 }
             }
         }
+        eqWasEnabled = eqOn;
     }
 
     for (int c = 0; c < 2; ++c)
-        levels[(size_t) c] = mix.getMagnitude (c, 0, numSamples);
+        peaks[c] = juce::jmax (peaks[c], mix.getMagnitude (c, 0, numSamples));
 
     for (int c = 0; c < numOuts; ++c)
         if (outputs[c] != nullptr)
-            juce::FloatVectorOperations::copy (outputs[c], mix.getReadPointer (juce::jmin (c, 1)), numSamples);
+            juce::FloatVectorOperations::copy (outputs[c] + offset, mix.getReadPointer (juce::jmin (c, 1)), numSamples);
 }

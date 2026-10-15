@@ -11,7 +11,7 @@
   <img class="logo" src="../../Resources/icon_256.png" alt="Logo">
   <h1>Artilody Soundsculp</h1>
   <div class="sub">Brugermanual – dansk</div>
-  <div class="ver">Version 1.1.2</div>
+  <div class="ver">Version 1.1.3</div>
 </div>
 
 <h2>Indhold</h2>
@@ -43,7 +43,7 @@ som kan deles, flyttes rundt – også til andre spor – og samles igen, ligeso
 <p>Programmet kan bl.a.: trimme, klippe/kopiere/indsætte, dele og samle klip, fade ind og ud, normalisere, fjerne stilhed,
 loope, vende lyd baglæns, ændre tonen uden at ændre hastigheden, bruge en parametrisk EQ og en støjfjerner,
 tegne en volumenlinje på hvert spor, sætte farvede markører, optage fra mikrofon, flette spor og eksportere til
-WAV, AIFF, FLAC, OGG, MP3, M4A og Opus.</p>
+WAV, AIFF, FLAC og Ogg Vorbis.</p>
 <p>Programmet er på engelsk. Under <b>Settings (tandhjulet) → Language</b> kan du skifte til dansk (kræver genstart).
 Denne manual bruger de engelske navne på knapperne, med den danske betydning i parentes.</p>
 <p>Alle ændringer kan fortrydes. Den originale fil ændres aldrig – resultatet gemmes først, når du eksporterer.</p>
@@ -52,23 +52,25 @@ Denne manual bruger de engelske navne på knapperne, med den danske betydning i 
 <p>Hent installationsfilen fra siden <b>Releases</b> på <code>github.com/shenphenchoedron-hue/Artilody-Soundsculp</code>.</p>
 <h3>Windows (10 og 11)</h3>
 <ol>
-  <li>Hent <code>ArtilodySoundsculp-1.1.2-Windows-Setup.exe</code> og dobbeltklik på den.</li>
+  <li>Hent <code>ArtilodySoundsculp-1.1.3-Windows-Setup.exe</code> og dobbeltklik på den.</li>
   <li>Viser Windows SmartScreen "Windows beskyttede din pc", så klik <b>Flere oplysninger</b> → <b>Kør alligevel</b>.</li>
   <li>Følg guiden. Programmet og manualerne findes derefter i Start-menuen.</li>
 </ol>
 <p>Der findes også en <i>Portable</i>-zip, som kan pakkes ud og køres uden installation.</p>
 <h3>macOS (11 eller nyere, Intel og Apple Silicon)</h3>
 <ol>
-  <li>Hent <code>ArtilodySoundsculp-1.1.2-macOS-Universal.dmg</code>, åbn den og træk programmet over i <b>Programmer</b>.</li>
-  <li>Første gang: højreklik på programmet, vælg <b>Åbn</b> og bekræft. Hjælper det ikke, så skriv i Terminal:
-      <code>xattr -cr "/Applications/Artilody Soundsculp.app"</code></li>
+  <li>Hent <code>ArtilodySoundsculp-1.1.3-macOS-Universal.dmg</code>, åbn den og træk programmet over i <b>Programmer</b>.</li>
+  <li>Første gang (programmet er ikke notariseret): på macOS 15 Sequoia eller nyere skal du først prøve at åbne programmet,
+      derefter åbne <b>Systemindstillinger → Anonymitet og sikkerhed</b> og klikke <b>Åbn alligevel</b> ved beskeden om Artilody Soundsculp.
+      På macOS 11–14 kan du i stedet højreklikke på programmet, vælge <b>Åbn</b> og bekræfte. Alternativt kan du skrive i Terminal:
+      <code>xattr -dr com.apple.quarantine "/Applications/Artilody Soundsculp.app"</code></li>
   <li>Når du optager første gang, beder macOS om adgang til mikrofonen – svar <b>OK</b>.</li>
 </ol>
 <h3>Debian (12+) og Ubuntu (22.04 / 24.04)</h3>
 <p>Hent den <code>.deb</code>-fil der passer til dit system og installér med fx:</p>
-<p><code>sudo apt install ./artilody-soundsculp_1.1.2_debian-12_amd64.deb</code></p>
+<p><code>sudo apt install ./artilody-soundsculp_1.1.3_debian-12_amd64.deb</code></p>
 <p>Programmet findes i programmenuen under <b>Lyd og video</b> eller startes med <code>artilody-soundsculp</code>.
-Pakken er selvstændig – alt hvad programmet skal bruge (også ffmpeg til MP3, M4A og Opus) følger med, så der skal ikke hentes andet. Afinstallér med <code>sudo apt remove artilody-soundsculp</code>.</p>
+Pakken er selvstændig – alt hvad programmet skal bruge følger med, så der skal ikke hentes andet. Afinstallér med <code>sudo apt remove artilody-soundsculp</code>.</p>
 
 <div class="page-break"></div>
 <h2>3. Skærmbilledet</h2>
@@ -91,7 +93,7 @@ Pakken er selvstændig – alt hvad programmet skal bruge (også ffmpeg til MP3,
 <h2>4. Spor: åbne, oprette og flette</h2>
 <h3>Åbne lydfiler</h3>
 <p>Klik på <b>Open file</b> i topbjælken eller <b>Open</b> over spor-listen (<kbd>Ctrl+O</kbd>). Du kan vælge flere filer på én gang
-eller trække filer ind i vinduet. Hver fil bliver et nyt spor nederst. Formater: WAV, AIFF, FLAC, OGG, MP3 – og med ffmpeg også M4A, Opus m.fl.</p>
+eller trække filer ind i vinduet. Hver fil bliver et nyt spor nederst. Formater: WAV, AIFF, FLAC, Ogg Vorbis og MP3 på alle systemer; på macOS også M4A/AAC og CAF. Opus-filer kan ikke åbnes.</p>
 <h3>Vælge et spor</h3>
 <p>Klik på et spor for at vælge det (det får en blå titellinje). Redigering, effekter og markører virker på det valgte spor.
 Dobbeltklik på titellinjen for at omdøbe sporet, og klik <b>×</b> for at lukke det.</p>
@@ -215,8 +217,7 @@ Lydenheder vælges under <b>Settings → Audio settings…</b>.</p>
 <p>Klik <b>Export</b> (<kbd>Ctrl+E</kbd>). I vinduet vælger du:</p>
 <ul>
   <li><b>What to export</b>: <i>Current track</i> (aktuelt spor), <i>Selection only</i> (kun markering) eller <i>All tracks mixed</i> (alle spor mixet til én fil – spor med M udelades, solo-spor vinder).</li>
-  <li><b>Format</b>: Ukomprimeret (WAV 16/24/32-bit, AIFF), Tabsfri (FLAC 16/24, Apple Lossless) eller Komprimeret (MP3 320/192, OGG, M4A/AAC, Opus).
-      ffmpeg til MP3, M4A og Opus følger med på alle systemer.</li>
+  <li><b>Format</b>: WAV (16-bit, 24-bit eller 32-bit float), AIFF (24-bit), FLAC (16-bit eller 24-bit, tabsfri) eller Ogg Vorbis (192 kbps, komprimeret).</li>
   <li><b>File name</b> og <b>Folder</b> (med <b>Choose…</b>). Filtypen skifter automatisk med formatet.</li>
 </ul>
 <p>Informationslinjen viser længde, samplerate, stereo/mono og cirka filstørrelse. Volumenlinjer medregnes altid.
@@ -245,7 +246,7 @@ Programmet husker sidste format og mappe. Findes filen, spørges der før den er
 <ul>
   <li><b>Ingen lyd</b>: tjek udgangsenheden under <b>Settings → Audio settings</b>, og at sporene ikke står på M (mute).</li>
   <li><b>Optagelse virker ikke</b>: vælg en indgangsenhed i Audio settings. På macOS: giv mikrofonadgang i Systemindstillinger → Anonymitet og sikkerhed → Mikrofon.</li>
-  <li><b>MP3/M4A/Opus er gråtonet</b>: den medfølgende ffmpeg mangler – geninstallér programmet.</li>
+  <li><b>En fil kan ikke åbnes</b>: Opus-filer understøttes ikke, og M4A/AAC-filer kan kun åbnes på macOS. Konvertér først filen til WAV eller FLAC med et andet program.</li>
   <li><b>macOS siger at appen er beskadiget</b>: <code>xattr -cr "/Applications/Artilody Soundsculp.app"</code> i Terminal.</li>
 </ul>
 <p>Fejl og ønsker kan meldes på GitHub under <b>Issues</b>. Artilody Soundsculp er fri software under GPL-3.0 og er bygget med JUCE.</p>

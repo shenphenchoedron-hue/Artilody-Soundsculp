@@ -14,8 +14,11 @@ public:
     {
         bool hasTrack = false, hasSelection = false, multipleTracks = false;
         double trackSeconds = 0, selectionSeconds = 0, mixSeconds = 0;
-        double sampleRate = 44100.0;
-        int channels = 2;
+        double sampleRate = 44100.0;       // kept for compatibility (not used by the dialog)
+        int channels = 2;                  // kept for compatibility (not used by the dialog)
+        // per-scope output format (used for the info text / size estimate)
+        double trackRate = 44100, selectionRate = 44100, mixRate = 44100;
+        int trackChannels = 2, selectionChannels = 2, mixChannels = 2;
         juce::String trackName, lastFormatId;
         juce::File folder;
         int initialScope = 0;
@@ -39,7 +42,6 @@ private:
 
     Options options;
     int scope = 0;
-    bool ffmpegAvailable = false;
 
     ScopeCard trackCard { "normalize", T ("Current track", "Aktuelt spor") };
     ScopeCard selectionCard { "select", T ("Selection only", "Kun markering") };
@@ -53,6 +55,8 @@ private:
     juce::Rectangle<int> scopeLabelArea, formatLabelArea, nameLabelArea, folderLabelArea, infoArea;
 
     void setScope (int s);
+    bool isScopeAvailable (int s) const;
+    void updateExportEnabled();
     void formatChanged();
     void updateInfo();
     const FileIO::ExportFormat* selectedFormat() const;

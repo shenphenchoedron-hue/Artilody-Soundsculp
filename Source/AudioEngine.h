@@ -32,7 +32,12 @@ public:
     bool isLooping() const                            { return looping.load(); }
     void setLoopRange (double startSeconds, double endSeconds);
     double getPosition() const                        { return position.load(); }
-    void setPosition (double seconds)                 { position = juce::jmax (0.0, seconds); }
+    void setPosition (double seconds)
+    {
+        seconds = std::isfinite (seconds) ? juce::jmax (0.0, seconds) : 0.0;
+        position = seconds;
+        pendingSeek = seconds;     // consumed by the audio callback (works during playback)
+    }
 
     // Plays a temporary buffer (used for effect previews). Stops normal playback.
     void playPreview (juce::AudioBuffer<float>&& buffer, double sampleRate);
@@ -41,8 +46,11 @@ public:
 
     // Recording into a document that grows while recording.
     bool startRecording (AudioDocument* target, juce::String& error);
-    void stopRecording();
+    AudioDocument* stopRecording();                   // returns the document that was recorded (nullptr if none)
+    AudioDocument* getRecordTarget() const            { return recordTarget; }   // message thread
     bool isRecording() const                          { return recording.load(); }
+    // True if input audio was lost (FIFO overflow or length limit) since recording started.
+    bool hadRecordingOverflow() const                 { return recordOverflow.load(); }
     int getNumInputChannels() const;
 
     // Real-time EQ on normal playback
@@ -63,6 +71,8 @@ public:
 private:
     void timerCallback() override;
     void renderDocument (AudioDocument& doc, double startTime, int numSamples, juce::AudioBuffer<float>& dest);
+    void processBlock (float* const* outputs, int numOuts, int offset, int numSamples, float* peaks);
+    void drainRecordFifo();
     double getEndTime() const;
     void rebuildEQ();
 
@@ -76,23 +86,35 @@ private:
     std::atomic<bool> previewing { false }, recording { false };
     std::atomic<bool> reachedEnd { false };
     std::atomic<double> position { 0.0 }, loopStart { 0.0 }, loopEnd { 0.0 };
+    std::atomic<double> pendingSeek { -1.0 };   // < 0 == none
+    std::atomic<bool> callbackActive { false };
     std::atomic<double> deviceRate { 44100.0 };
     std::array<std::atomic<float>, 2> levels {};
 
     juce::AudioBuffer<float> mixBuffer, chunkBuffer;
+    std::vector<float> gainScratch;             // envelope gains, sized like mixBuffer
 
     // Preview
     juce::AudioBuffer<float> previewBuffer;
     double previewRate = 44100.0;
     std::atomic<double> previewPos { 0.0 };   // seconds
 
-    // EQ
+    // EQ: plain biquad coefficients (computed on the message thread, copied without allocation)
+    struct Biquad
+    {
+        float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
+        bool active = false;   // false == pass-through
+    };
+    struct BiquadState { float z1 = 0.0f, z2 = 0.0f; };
+
     juce::SpinLock eqLock;
     EQSettings eqSettings;
     std::atomic<bool> eqEnabled { false };
-    bool eqDirty = false;
-    juce::ReferenceCountedArray<juce::dsp::IIR::Coefficients<float>> pendingCoeffs, activeCoeffs;
-    std::array<std::array<juce::dsp::IIR::Filter<float>, 4>, 2> eqFilters;   // [channel][band]
+    std::atomic<bool> eqResetPending { true };
+    bool eqDirty = false;                       // guarded by eqLock
+    bool eqWasEnabled = false;                  // audio thread only
+    std::array<Biquad, 4> pendingCoeffs, activeCoeffs;
+    std::array<std::array<BiquadState, 4>, 2> eqState {};   // [channel][band]
 
     // Recording
     AudioDocument* recordTarget = nullptr;
@@ -102,6 +124,8 @@ private:
     std::vector<std::vector<float>> recordData;
     std::vector<float*> recordPointers;
     juce::int64 recordedSamples = 0;
+    std::atomic<bool> recordOverflow { false };
+    static constexpr juce::int64 maxRecordSamples = (juce::int64) std::numeric_limits<int>::max() - 65536;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioEngine)
 };

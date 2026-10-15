@@ -20,9 +20,17 @@ public:
 
     static constexpr float minDb = -15.0f, maxDb = 15.0f;
 
+    // Sample rate used to draw the response; frequencies are limited to 0.49 * rate.
+    void setSampleRate (double sr)     { sampleRate = sr; repaint(); }
+    float getMaxFrequency() const;
+
+    // Highest Q allowed for a band (shelves are limited to avoid large overshoot).
+    static float maxQFor (const EQBand& b);
+
 private:
     EQSettings& settings;
     int dragBand = -1;
+    double sampleRate = 48000.0;
 
     juce::Rectangle<float> plotArea() const;
     float xForFreq (float f) const;
@@ -40,7 +48,16 @@ public:
     EQPanel();
 
     EQSettings& getSettings()          { return settings; }
-    bool isEQEnabled() const           { return enableSwitch.getToggleState(); }
+    // Live EQ is only active while the switch is on AND the panel is shown, so a
+    // hidden panel never leaves an invisible EQ running. onChange is called when
+    // the panel is shown or hidden.
+    bool isEQEnabled() const           { return enableSwitch.getToggleState() && isVisible(); }
+    bool isEQSwitchOn() const          { return enableSwitch.getToggleState(); }
+
+    // Sample rate of the current track: the curve is drawn at this rate and the
+    // frequency controls are limited to 0.49 * sr. Default 48000.
+    void setSampleRate (double sr);
+    double getSampleRate() const       { return sampleRate; }
 
     std::function<void()> onChange;    // settings or enabled state changed
     std::function<void()> onApply;     // apply EQ destructively to selection / track
@@ -48,6 +65,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void visibilityChanged() override;
     void refreshRows();
 
 private:
@@ -57,6 +75,7 @@ private:
         void resized() override;
         void paint (juce::Graphics&) override;
         void refresh();
+        void updateFrequencyRange();
 
         EQPanel& owner;
         int index;
@@ -66,6 +85,7 @@ private:
     };
 
     EQSettings settings;
+    double sampleRate = 48000.0;
     EQCurve curve { settings };
     SwitchButton enableSwitch;
     IconButton moreButton { "more" };

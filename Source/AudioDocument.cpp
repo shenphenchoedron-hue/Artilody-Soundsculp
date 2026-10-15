@@ -145,6 +145,11 @@ juce::AudioBuffer<float> AudioDocument::copyRange (juce::int64 start, juce::int6
 {
     start = std::max<juce::int64> (0, start);
     end = std::max (start, end);
+    if (end - start > (juce::int64) std::numeric_limits<int>::max() - 16)
+    {
+        jassertfalse;   // a JUCE AudioBuffer cannot hold this many samples
+        return juce::AudioBuffer<float> (juce::jmax (1, numChannels), 0);
+    }
     juce::AudioBuffer<float> out (juce::jmax (1, numChannels), (int) (end - start));
     out.clear();
     renderInto (start, (int) (end - start), out, 0);
@@ -174,21 +179,23 @@ void AudioDocument::setBuffer (juce::AudioBuffer<float>&& newBuffer, double newR
 void AudioDocument::removeRange (juce::int64 s, juce::int64 e)
 {
     if (e <= s) return;
-    std::vector<Clip> result;
-    for (auto& c : clips)
+
+    // Build the trimmed pieces outside the lock (only the message thread writes clips) ...
+    std::vector<std::vector<Clip>> pieces (clips.size());
+    bool touched = false;
+    for (size_t i = 0; i < clips.size(); ++i)
     {
+        auto& c = clips[i];
         if (c.end() <= s || c.start >= e)
-        {
-            result.push_back (c);
             continue;
-        }
+        touched = true;
         if (c.start < s)
         {
             Clip left;
             left.start = c.start;
             left.audio = slice (c.audio, 0, s - c.start);
             left.name = c.name;
-            result.push_back (std::move (left));
+            pieces[i].push_back (std::move (left));
         }
         if (c.end() > e)
         {
@@ -196,11 +203,30 @@ void AudioDocument::removeRange (juce::int64 s, juce::int64 e)
             right.start = e;
             right.audio = slice (c.audio, e - c.start, c.end() - e);
             right.name = c.name;
-            result.push_back (std::move (right));
+            pieces[i].push_back (std::move (right));
         }
     }
-    const juce::ScopedLock sl (lock);
-    clips = std::move (result);
+    if (! touched) return;
+
+    // ... then move the untouched clips (no audio copies) and swap under the lock.
+    std::vector<Clip> result;
+    result.reserve (clips.size() + 1);
+    {
+        const juce::ScopedLock sl (lock);
+        for (size_t i = 0; i < clips.size(); ++i)
+        {
+            auto& c = clips[i];
+            if (c.end() <= s || c.start >= e)
+                result.push_back (std::move (c));
+            else
+                for (auto& p : pieces[i])
+                    result.push_back (std::move (p));
+        }
+        clips.swap (result);
+    }
+    // 'result' now holds the removed audio and is freed outside the lock
+    result.clear();
+    updateCachedLength();
 }
 
 void AudioDocument::shiftAnnotations (double a, double b, double delta)
@@ -230,6 +256,7 @@ void AudioDocument::rippleRemove (juce::int64 s, juce::int64 e)
         for (auto& c : clips)
             if (c.start >= e) c.start -= (e - s);
     }
+    updateCachedLength();
     shiftAnnotations (toSeconds (s), toSeconds (e), -toSeconds (e - s));
 }
 
@@ -244,9 +271,13 @@ void AudioDocument::splitAt (juce::int64 pos)
     right.audio = slice (c.audio, pos - c.start, c.end() - pos);
     right.name = c.name;
     auto leftAudio = slice (c.audio, 0, pos - c.start);
-    const juce::ScopedLock sl (lock);
-    clips[(size_t) idx].audio = std::move (leftAudio);
-    clips.push_back (std::move (right));
+    {
+        const juce::ScopedLock sl (lock);
+        std::swap (clips[(size_t) idx].audio, leftAudio);   // old audio freed outside the lock
+        clips.push_back (std::move (right));
+        sortClips();
+    }
+    updateCachedLength();
 }
 
 void AudioDocument::insertClip (juce::int64 pos, juce::AudioBuffer<float> data, const juce::String& clipName)
@@ -284,7 +315,9 @@ void AudioDocument::insertClip (juce::int64 pos, juce::AudioBuffer<float> data, 
         n.audio = std::move (data);
         n.name = clipName.isNotEmpty() ? clipName : newClipName();
         clips.push_back (std::move (n));
+        sortClips();
     }
+    updateCachedLength();
     if (shift > 0)
         shiftAnnotations (toSeconds (pos), toSeconds (pos), toSeconds (shift));
 }
@@ -304,6 +337,11 @@ void AudioDocument::joinRange (juce::int64 s, juce::int64 e)
         if (clips[(size_t) i].start < a) { a = clips[(size_t) i].start; firstName = clips[(size_t) i].name; }
         b = std::max (b, clips[(size_t) i].end());
     }
+    if (b - a > (juce::int64) std::numeric_limits<int>::max() - 16)
+    {
+        jassertfalse;   // too long for one AudioBuffer - leave the clips as they are
+        return;
+    }
     Clip joined;
     joined.start = a;
     joined.name = firstName;
@@ -316,10 +354,19 @@ void AudioDocument::joinRange (juce::int64 s, juce::int64 e)
             joined.audio.addFrom (ch, (int) (c.start - a), c.audio, juce::jmin (ch, c.audio.getNumChannels() - 1), 0, (int) c.length());
     }
 
-    const juce::ScopedLock sl (lock);
-    for (int k = (int) idx.size(); --k >= 0;)
-        clips.erase (clips.begin() + idx[(size_t) k]);
-    clips.push_back (std::move (joined));
+    std::vector<Clip> removed;
+    {
+        const juce::ScopedLock sl (lock);
+        for (int k = (int) idx.size(); --k >= 0;)
+        {
+            removed.push_back (std::move (clips[(size_t) idx[(size_t) k]]));
+            clips.erase (clips.begin() + idx[(size_t) k]);
+        }
+        clips.push_back (std::move (joined));
+        sortClips();
+    }
+    removed.clear();   // freed outside the lock
+    updateCachedLength();
 }
 
 void AudioDocument::processRange (juce::int64 s, juce::int64 e,
@@ -368,15 +415,28 @@ void AudioDocument::moveClip (int index, juce::int64 newStart)
     if (! juce::isPositiveAndBelow (index, (int) clips.size())) return;
     auto pos = findFreePosition (newStart, clips[(size_t) index].length(), index);
     if (pos < 0) return;
-    const juce::ScopedLock sl (lock);
-    clips[(size_t) index].start = pos;
+    {
+        // No sorting here: callers (clip drags) keep using the same index.
+        const juce::ScopedLock sl (lock);
+        clips[(size_t) index].start = pos;
+    }
+    updateCachedLength();
 }
 
 Clip AudioDocument::takeClip (int index)
 {
-    const juce::ScopedLock sl (lock);
-    Clip c = std::move (clips[(size_t) index]);
-    clips.erase (clips.begin() + index);
+    if (! juce::isPositiveAndBelow (index, (int) clips.size()))
+    {
+        jassertfalse;
+        return {};
+    }
+    Clip c;
+    {
+        const juce::ScopedLock sl (lock);
+        c = std::move (clips[(size_t) index]);
+        clips.erase (clips.begin() + index);
+    }
+    updateCachedLength();
     return c;
 }
 
@@ -387,19 +447,48 @@ int AudioDocument::addClip (Clip c)
     auto pos = findFreePosition (c.start, c.length(), -1);
     c.start = pos >= 0 ? pos : getLength();
     c.rebuildPeaks();
-    const juce::ScopedLock sl (lock);
-    clips.push_back (std::move (c));
-    return (int) clips.size() - 1;
+    const auto start = c.start;
+    int index = -1;
+    {
+        const juce::ScopedLock sl (lock);
+        clips.push_back (std::move (c));
+        sortClips();
+        for (int i = 0; i < (int) clips.size(); ++i)
+            if (clips[(size_t) i].start == start) { index = i; break; }
+    }
+    updateCachedLength();
+    return index >= 0 ? index : (int) clips.size() - 1;
 }
 
 void AudioDocument::setChannelCount (int channels)
 {
     channels = juce::jlimit (1, 8, channels);
+    // convert outside the lock, swap under it
+    std::vector<juce::AudioBuffer<float>> converted (clips.size());
+    for (size_t i = 0; i < clips.size(); ++i)
+        if (clips[i].audio.getNumChannels() != channels)
+            converted[i] = convertChannels (clips[i].audio, channels);
+
+    {
+        const juce::ScopedLock sl (lock);
+        numChannels = channels;
+        for (size_t i = 0; i < clips.size(); ++i)
+            if (clips[i].audio.getNumChannels() != channels)
+                std::swap (clips[i].audio, converted[i]);
+    }
+}
+
+void AudioDocument::sortClips()
+{
     const juce::ScopedLock sl (lock);
-    numChannels = channels;
-    for (auto& c : clips)
-        if (c.audio.getNumChannels() != channels)
-            c.audio = convertChannels (c.audio, channels);
+    if (std::is_sorted (clips.begin(), clips.end(), [] (const Clip& x, const Clip& y) { return x.start < y.start; }))
+        return;
+    std::stable_sort (clips.begin(), clips.end(), [] (const Clip& x, const Clip& y) { return x.start < y.start; });
+}
+
+void AudioDocument::updateCachedLength()
+{
+    cachedLengthSeconds = getLengthSeconds();
 }
 
 //==============================================================================
@@ -482,10 +571,27 @@ void AudioDocument::sortMarkers()
 }
 
 //==============================================================================
-AudioDocument::State AudioDocument::captureState (const juce::String& desc) const
+size_t AudioDocument::clipBytes (const std::vector<Clip>& cs)
+{
+    size_t total = 0;
+    for (auto& c : cs)
+    {
+        total += (size_t) c.audio.getNumChannels() * (size_t) c.audio.getNumSamples() * sizeof (float);
+        for (auto& p : c.peaks)
+            total += p.size() * sizeof (Peak);
+    }
+    return total;
+}
+
+AudioDocument::State AudioDocument::captureState (const juce::String& desc, bool annotationsOnly) const
 {
     State s;
-    s.clips = clips;
+    if (! annotationsOnly)
+    {
+        s.clips = clips;
+        s.bytes = clipBytes (s.clips);
+    }
+    s.annotationsOnly = annotationsOnly;
     s.sampleRate = sampleRate;
     s.numChannels = numChannels;
     s.envelope = envelope;
@@ -497,53 +603,106 @@ AudioDocument::State AudioDocument::captureState (const juce::String& desc) cons
     return s;
 }
 
-void AudioDocument::restoreState (const State& s)
+void AudioDocument::applyState (State& s)
 {
+    // Only swaps under the lock (no copying or freeing of audio while the audio thread waits).
     {
         const juce::ScopedLock sl (lock);
-        clips = s.clips;
-        sampleRate = s.sampleRate;
-        numChannels = s.numChannels;
-        envelope = s.envelope;
+        if (! s.annotationsOnly)
+        {
+            clips.swap (s.clips);
+            std::swap (sampleRate, s.sampleRate);
+            std::swap (numChannels, s.numChannels);
+        }
+        envelope.swap (s.envelope);
     }
-    markers = s.markers;
-    selStart = s.selStart;
-    selEnd = s.selEnd;
-    cursor = s.cursor;
+    markers.swap (s.markers);
+    std::swap (selStart, s.selStart);
+    std::swap (selEnd, s.selEnd);
+    std::swap (cursor, s.cursor);
+    s.bytes = s.annotationsOnly ? 0 : clipBytes (s.clips);
 }
 
-void AudioDocument::pushUndo (const juce::String& description)
+void AudioDocument::trimHistory()
 {
-    undoStack.push_back (captureState (description));
-    if (undoStack.size() > maxUndo)
+    auto totalBytes = [this]
+    {
+        size_t t = 0;
+        for (auto& st : undoStack) t += st.bytes;
+        for (auto& st : redoStack) t += st.bytes;
+        return t;
+    };
+
+    while (undoStack.size() > maxUndo)
         undoStack.erase (undoStack.begin());
+    while (redoStack.size() > maxUndo)
+        redoStack.erase (redoStack.begin());
+
+    // Drop the oldest states up to and including the oldest full state until the memory budget is
+    // met; always keep the newest undo state. Light (annotation-only) states are only dropped when
+    // that actually frees memory, i.e. when a full state below them is dropped too.
+    auto firstFull = [] (const std::vector<State>& stack, size_t removable) -> size_t
+    {
+        for (size_t i = 0; i < removable; ++i)
+            if (stack[i].bytes > 0) return i;
+        return removable;   // none
+    };
+
+    auto bytes = totalBytes();
+    while (bytes > maxUndoBytes)
+    {
+        const size_t undoRemovable = undoStack.size() > 1 ? undoStack.size() - 1 : 0;
+        const size_t redoRemovable = redoStack.empty() ? 0 : (undoStack.empty() ? redoStack.size() : redoStack.size() - 1);
+
+        auto dropThrough = [&bytes] (std::vector<State>& stack, size_t index)
+        {
+            for (size_t i = 0; i <= index; ++i) bytes -= stack[i].bytes;
+            stack.erase (stack.begin(), stack.begin() + (std::ptrdiff_t) index + 1);
+        };
+
+        const auto u = firstFull (undoStack, undoRemovable);
+        if (u < undoRemovable) { dropThrough (undoStack, u); continue; }
+
+        const auto r = firstFull (redoStack, redoRemovable);     // index 0 = redo state furthest away
+        if (r < redoRemovable) { dropThrough (redoStack, r); continue; }
+
+        break;   // nothing removable would free memory
+    }
+}
+
+void AudioDocument::pushUndo (const juce::String& description, bool annotationsOnly)
+{
+    undoStack.push_back (captureState (description, annotationsOnly));
     redoStack.clear();
+    trimHistory();
+}
+
+bool AudioDocument::stepHistory (std::vector<State>& from, std::vector<State>& to)
+{
+    if (from.empty())
+        return false;
+
+    State s = std::move (from.back());
+    from.pop_back();
+
+    // The current document goes to the opposite stack as the same kind of state:
+    // applyState() swaps, so 's' afterwards holds exactly the data that was replaced.
+    applyState (s);
+    to.push_back (std::move (s));
+    trimHistory();
+
+    changed();   // sorts clips, rebuilds peaks, updates the cached length
+    return true;
 }
 
 bool AudioDocument::undo()
 {
-    if (undoStack.empty())
-        return false;
-
-    auto desc = undoStack.back().description;
-    redoStack.push_back (captureState (desc));
-    restoreState (undoStack.back());
-    undoStack.pop_back();
-    changed();
-    return true;
+    return stepHistory (undoStack, redoStack);
 }
 
 bool AudioDocument::redo()
 {
-    if (redoStack.empty())
-        return false;
-
-    auto desc = redoStack.back().description;
-    undoStack.push_back (captureState (desc));
-    restoreState (redoStack.back());
-    redoStack.pop_back();
-    changed();
-    return true;
+    return stepHistory (redoStack, undoStack);
 }
 
 void AudioDocument::clearHistory()
@@ -561,7 +720,9 @@ void AudioDocument::rebuildPeaks()
 
 void AudioDocument::changed (bool markModified)
 {
+    sortClips();
     rebuildPeaks();
+    updateCachedLength();
     if (markModified)
         modified = true;
     sendChangeMessage();

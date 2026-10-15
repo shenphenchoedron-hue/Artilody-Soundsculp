@@ -25,7 +25,7 @@ static void closeDialog (juce::Component* c)
         dw->exitModalState (0);
 }
 
-static void launchDialog (juce::Component* content, const juce::String& title, juce::Component* parent)
+static juce::DialogWindow* launchDialog (juce::Component* content, const juce::String& title, juce::Component* parent)
 {
     juce::DialogWindow::LaunchOptions o;
     o.content.setOwned (content);
@@ -35,8 +35,130 @@ static void launchDialog (juce::Component* content, const juce::String& title, j
     o.useNativeTitleBar = true;
     o.resizable = false;
     o.componentToCentreAround = parent;
-    o.launchAsync();
+    return o.launchAsync();
 }
+
+// Buffers and AudioDocument ranges are limited to 32-bit sample counts.
+static bool fitsInt (juce::int64 n)
+{
+    return n >= 0 && n <= (juce::int64) std::numeric_limits<int>::max();
+}
+
+static juce::String tooLongMessage()
+{
+    return T ("The audio is too long for this operation (more than 2^31 samples).",
+              "Lyden er for lang til denne handling (mere end 2^31 samples).");
+}
+
+//==============================================================================
+// Mixing (thread safe: works on copies, never on documents)
+//==============================================================================
+struct MixPart
+{
+    juce::AudioBuffer<float> audio;     // volume line already applied
+    double rate = 44100.0;
+};
+
+static juce::AudioBuffer<float> mixParts (std::vector<MixPart>& parts, double& rateOut, bool& normalised, juce::String& error)
+{
+    double rate = 0.0;
+    int channels = 1;
+    for (auto& p : parts)
+    {
+        rate = juce::jmax (rate, p.rate);
+        channels = juce::jmax (channels, p.audio.getNumChannels());
+    }
+    if (rate <= 0) rate = 44100.0;
+    channels = juce::jmin (channels, 2);
+    rateOut = rate;
+    normalised = false;
+
+    for (auto& p : parts)
+        if (! fitsInt ((juce::int64) std::ceil ((double) p.audio.getNumSamples() * rate / juce::jmax (1.0, p.rate)) + 16))
+        {
+            error = tooLongMessage();
+            return {};
+        }
+
+    int length = 0;
+    for (auto& p : parts)
+    {
+        auto r = DSP::resample (p.audio, p.rate / rate);
+        p.audio = DSP::matchChannels (r, channels);
+        length = juce::jmax (length, p.audio.getNumSamples());
+    }
+
+    juce::AudioBuffer<float> mix (channels, length);
+    mix.clear();
+    for (auto& p : parts)
+    {
+        for (int c = 0; c < channels; ++c)
+            mix.addFrom (c, 0, p.audio, c, 0, p.audio.getNumSamples());
+        p.audio.setSize (0, 0);       // free memory early
+    }
+
+    if (DSP::getPeak (mix) > 1.0f)
+    {
+        DSP::normalize (mix, -0.3f);
+        normalised = true;
+    }
+    return mix;
+}
+
+//==============================================================================
+// Background export: mixing and writing run off the message
+// thread. All audio is copied on the message thread before the job starts, so
+// documents may be closed while the export runs.
+//==============================================================================
+class ExportJob : public juce::ThreadWithProgressWindow
+{
+public:
+    // ok, error, normalised - called asynchronously on the message thread
+    std::function<void (bool, const juce::String&, bool)> onDone;
+
+    ExportJob (std::vector<MixPart>&& partsToMix, juce::AudioBuffer<float>&& singleBuffer, double singleRate,
+               const FileIO::ExportFormat& fmt, const juce::File& dest, juce::Component* centreAround)
+        : juce::ThreadWithProgressWindow (T ("Exporting...", "Eksporterer..."), true, false, 60000, {}, centreAround),
+          parts (std::move (partsToMix)), data (std::move (singleBuffer)), rate (singleRate), format (fmt), file (dest)
+    {
+        setStatusMessage (T ("Exporting ", "Eksporterer ") + file.getFileName());
+    }
+
+    void run() override
+    {
+        setProgress (-1.0);      // indeterminate
+        if (threadShouldExit()) { ok = false; return; }
+        if (! parts.empty())
+        {
+            setStatusMessage (T ("Mixing tracks...", "Mixer spor..."));
+            data = mixParts (parts, rate, normalised, error);
+            if (error.isNotEmpty()) { ok = false; return; }
+        }
+        if (threadShouldExit()) { ok = false; return; }
+        setStatusMessage (T ("Writing ", "Skriver ") + file.getFileName());
+        ok = FileIO::writeBuffer (data, rate, file, format, error);
+        data.setSize (0, 0);
+    }
+
+    void threadComplete (bool userPressedCancel) override
+    {
+        auto cb = onDone;
+        const bool success = ok && ! userPressedCancel;
+        auto err = error;
+        const bool norm = normalised;
+        // the owner deletes this job from the callback, so never call it from here directly
+        juce::MessageManager::callAsync ([cb, success, err, norm] { if (cb) cb (success, err, norm); });
+    }
+
+private:
+    std::vector<MixPart> parts;
+    juce::AudioBuffer<float> data;
+    double rate = 44100.0;
+    FileIO::ExportFormat format;
+    juce::File file;
+    bool ok = false, normalised = false;
+    juce::String error;
+};
 
 //==============================================================================
 // Pitch dialog: semitone slider with preview / apply
@@ -87,6 +209,12 @@ public:
         cancel.onClick = [this] { if (onStopPreview) onStopPreview(); closeDialog (this); };
         addAndMakeVisible (preview); addAndMakeVisible (apply); addAndMakeVisible (cancel);
         setSize (520, 190);
+    }
+
+    ~PitchDialog() override
+    {
+        // closed with Escape or the title bar button: the preview must not keep playing
+        if (onStopPreview) onStopPreview();
     }
 
     void resized() override
@@ -198,6 +326,8 @@ MainComponent::MainComponent (juce::ApplicationProperties& props) : properties (
     addAndMakeVisible (noisePanel);
     addAndMakeVisible (statusBar);
 
+    noiseMaterialTimer.callback = [this] { updateNoiseMaterialNow(); };
+
     // ---- audio
     auto* settings = properties.getUserSettings();
     std::unique_ptr<juce::XmlElement> audioState (settings->getXmlValue ("audioDeviceState"));
@@ -244,7 +374,7 @@ MainComponent::MainComponent (juce::ApplicationProperties& props) : properties (
                 ensureVisibleSec (d->toSeconds (d->cursor));
                 if (engine.isPlaying()) engine.setPosition (d->markers[(size_t) i].time);
                 trackStack.repaintAll();
-                updateStatus();
+                selectionChanged();
             }
     };
     markersPanel.onChanged = [this] { trackStack.repaintAll(); refreshTrackList(); };
@@ -257,15 +387,7 @@ MainComponent::MainComponent (juce::ApplicationProperties& props) : properties (
     };
     trackStack.onCloseTrack = [this] (int i) { closeDocument (i); };
     trackStack.onRenameTrack = [this] (int i) { selectDocument (i); renameTrack(); };
-    trackStack.onSelectionChanged = [this]
-    {
-        if (auto* d = current())
-            if (engine.isPlaying() && ! d->hasSelection())
-                engine.setPosition (d->toSeconds (d->cursor));
-        updateLoopRange();
-        updateStatus();
-        updateNoiseMaterial();
-    };
+    trackStack.onSelectionChanged = [this] { selectionChanged(); };
     trackStack.onViewChanged = [this] { viewChanged(); };
     trackStack.onMarkersChanged = [this] (int idx)
     {
@@ -279,9 +401,8 @@ MainComponent::MainComponent (juce::ApplicationProperties& props) : properties (
         {
             d->selStart = d->selEnd = d->cursor = d->toSamples (t);
             if (engine.isPlaying()) engine.setPosition (t);
-            updateLoopRange();
             trackStack.repaintAll();
-            updateStatus();
+            selectionChanged();
         }
     };
     trackStack.onOpen = [this] { chooseFilesToOpen(); };
@@ -329,6 +450,15 @@ MainComponent::MainComponent (juce::ApplicationProperties& props) : properties (
 MainComponent::~MainComponent()
 {
     stopTimer();
+    noiseMaterialTimer.stopTimer();
+
+    // The audio settings dialog references the engine's device manager: delete it first.
+    if (auto* w = audioSettingsWindow.getComponent())
+        delete w;
+
+    // Waits for a running export to finish (it only works on copies of the audio).
+    exportJob.reset();
+
     engine.stop();
     engine.stopRecording();
     engine.setDocuments ({}, nullptr);
@@ -422,6 +552,18 @@ std::vector<AudioDocument*> MainComponent::allDocuments() const
     return v;
 }
 
+std::vector<AudioDocument*> MainComponent::audibleTracks() const
+{
+    // same rule as the playback engine: solo tracks win, otherwise muted tracks are left out
+    bool anySolo = false;
+    for (auto& d : documents) anySolo = anySolo || d->soloed.load();
+    std::vector<AudioDocument*> v;
+    for (auto& d : documents)
+        if ((anySolo ? d->soloed.load() : ! d->muted.load()) && d->getLength() > 0)
+            v.push_back (d.get());
+    return v;
+}
+
 AudioDocument* MainComponent::addDocument (std::unique_ptr<AudioDocument> d)
 {
     d->addChangeListener (this);
@@ -449,21 +591,34 @@ void MainComponent::closeDocument (int index)
     if (! juce::isPositiveAndBelow (index, (int) documents.size()))
         return;
 
-    auto doClose = [this, index]
+    auto* target = documents[(size_t) index].get();
+    juce::Component::SafePointer<MainComponent> safe (this);
+    auto doClose = [safe, target]
     {
-        if (! juce::isPositiveAndBelow (index, (int) documents.size())) return;
-        if (engine.isRecording()) engine.stopRecording();
-        engine.stop();
+        if (safe == nullptr) return;
+        auto* self = safe.getComponent();
 
-        auto victim = std::move (documents[(size_t) index]);
-        documents.erase (documents.begin() + index);
-        if (currentIndex >= (int) documents.size()) currentIndex = (int) documents.size() - 1;
-        else if (currentIndex > index) --currentIndex;
-        syncEngine();                          // engine no longer references the victim
-        victim->removeChangeListener (this);
+        // only stop the recording if this track is the one being recorded
+        if (self->engine.isRecording() && self->engine.getRecordTarget() == target)
+            self->stopRecordingAndFinish();
+        if (! self->engine.isRecording())
+            self->engine.stop();
+
+        // the index may have changed while the confirmation was open
+        int idx = -1;
+        for (int i = 0; i < (int) self->documents.size(); ++i)
+            if (self->documents[(size_t) i].get() == target) idx = i;
+        if (idx < 0) return;
+
+        auto victim = std::move (self->documents[(size_t) idx]);
+        self->documents.erase (self->documents.begin() + idx);
+        if (self->currentIndex >= (int) self->documents.size()) self->currentIndex = (int) self->documents.size() - 1;
+        else if (self->currentIndex > idx) --self->currentIndex;
+        self->syncEngine();                    // engine no longer references the victim
+        victim->removeChangeListener (self);
         victim.reset();
-        refreshAll();
-        resized();
+        self->refreshAll();
+        self->resized();
     };
 
     if (documents[(size_t) index]->modified && documents[(size_t) index]->getLength() > 0)
@@ -495,13 +650,56 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
         filePanel.repaint();
         markersPanel.refresh();
         updateStatus();
+        updatePanelSampleRates();
+        if (! engine.isRecording())
+        {
+            updateLoopRange();          // the length / selection may have changed (undo, edits)
+            updateNoiseMaterial();      // debounced
+        }
     }
     trackStack.repaintAll();
     refreshTrackList();
 }
 
+bool MainComponent::ownsDocument (const AudioDocument* d) const
+{
+    if (d == nullptr) return false;
+    for (auto& doc : documents)
+        if (doc.get() == d) return true;
+    return false;
+}
+
+void MainComponent::selectionChanged()
+{
+    if (auto* d = current())
+        if (engine.isPlaying() && ! d->hasSelection())
+            engine.setPosition (d->toSeconds (d->cursor));
+    updateLoopRange();
+    updateStatus();
+    updateNoiseMaterial();
+}
+
+void MainComponent::updatePanelSampleRates()
+{
+    auto* d = current();
+    const double rate = d != nullptr && d->sampleRate > 0 ? d->sampleRate : 48000.0;
+    if (std::abs (rate - panelSampleRate) < 0.01) return;
+    panelSampleRate = rate;
+    eqPanel.setSampleRate (rate);
+    noisePanel.setSampleRate (rate);
+}
+
 void MainComponent::refreshTrackList()
 {
+    // While recording the recorded track sends ~30 change messages per second;
+    // only rebuild the lists when something visible in them changed.
+    juce::String state (currentIndex);
+    for (auto& d : documents)
+        state << "|" << (d->modified ? "*" : "") << d->name;
+    if (engine.isRecording() && state == lastTrackListState)
+        return;
+    lastTrackListState = state;
+
     header.trackBox.clear (juce::dontSendNotification);
     for (int i = 0; i < (int) documents.size(); ++i)
         header.trackBox.addItem ((documents[(size_t) i]->modified ? "* " : "") + documents[(size_t) i]->name, i + 1);
@@ -520,6 +718,7 @@ void MainComponent::refreshAll()
     trackStack.ensureLaneVisible (currentIndex);
     filePanel.setDocument (d);
     markersPanel.setDocument (d);
+    updatePanelSampleRates();
     refreshTrackList();
     updateLoopRange();
     updateStatus();
@@ -588,6 +787,7 @@ void MainComponent::chooseFileToInsert()
         bool ok = FileIO::loadIntoDocument (f, temp, err);
         juce::MouseCursor::hideWaitCursor();
         if (! ok) { showError (T ("Could not open", "Kunne ikke åbne"), err); return; }
+        if (! fitsInt (temp.getLength())) { showError (T ("Could not open", "Kunne ikke åbne"), tooLongMessage()); return; }
         auto data = temp.copyRange (0, temp.getLength());
         insertBufferAtCursor (std::move (data), temp.sampleRate, T ("Insert file", "Indsæt fil"), f.getFileNameWithoutExtension());
         showMessage (T ("Inserted ", "Indsatte ") + f.getFileName());
@@ -622,7 +822,8 @@ void MainComponent::duplicateTrack()
     d->clips = src->clips;
     d->envelope = src->envelope;
     d->markers = src->markers;
-    d->modified = true;
+    d->nextMarkerColour = src->nextMarkerColour;
+    d->changed();               // updates the cached length / peaks and marks it modified
     addDocument (std::move (d));
 }
 
@@ -646,6 +847,11 @@ void MainComponent::showMergeDialog()
         showError (T ("Merge tracks", "Flet spor"), T ("Open or create at least two tracks first.", "Åbn eller opret mindst to spor først."));
         return;
     }
+    if (engine.isRecording())
+    {
+        showError (T ("Merge tracks", "Flet spor"), T ("Stop the recording first.", "Stop optagelsen først."));
+        return;
+    }
     auto* dlg = new MergeDialog (allDocuments());
     juce::Component::SafePointer<MainComponent> safe (this);
     dlg->onMerge = [safe] (std::vector<int> chosen, bool closeOthers)
@@ -656,80 +862,115 @@ void MainComponent::showMergeDialog()
             if (juce::isPositiveAndBelow (i, (int) safe->documents.size()))
                 tracks.push_back (safe->documents[(size_t) i].get());
 
-        double rate = 44100.0;
-        bool normalised = false;
-        juce::MouseCursor::showWaitCursor();
-        auto mix = safe->mixTracks (tracks, rate, normalised);
-        juce::MouseCursor::hideWaitCursor();
-
-        auto d = std::make_unique<AudioDocument>();
-        d->name = T ("Merged track", "Flettet spor");
-        d->formatName = T ("Mix", "Mix");
-        d->bitDepth = 24;
-        // keep markers from all merged tracks
-        for (auto* t : tracks)
-            for (auto& m : t->markers) d->markers.push_back (m);
-        d->setBuffer (std::move (mix), rate);
-        d->sortMarkers();
-        d->nextMarkerColour = (int) d->markers.size();
-        d->modified = true;
-
-        if (closeOthers)
+        auto doMerge = [safe, tracks, closeOthers]
         {
-            safe->engine.stop();
-            for (int i = (int) chosen.size(); --i >= 0;)
+            if (safe == nullptr) return;
+            auto* self = safe.getComponent();
+            if (self->engine.isRecording())
             {
-                auto idx = chosen[(size_t) i];
-                auto victim = std::move (safe->documents[(size_t) idx]);
-                safe->documents.erase (safe->documents.begin() + idx);
-                safe->currentIndex = -1;
-                safe->syncEngine();
-                victim->removeChangeListener (safe.getComponent());
+                self->showError (T ("Merge tracks", "Flet spor"), T ("Stop the recording first.", "Stop optagelsen først."));
+                return;
             }
+
+            // tracks may have been closed while a confirmation was open
+            std::vector<AudioDocument*> valid;
+            for (auto* t : tracks)
+                if (self->ownsDocument (t)) valid.push_back (t);
+            if (valid.empty()) return;
+
+            double rate = 44100.0;
+            bool normalised = false;
+            juce::String err;
+            juce::MouseCursor::showWaitCursor();
+            auto mix = self->mixTracks (valid, rate, normalised, &err);
+            juce::MouseCursor::hideWaitCursor();
+            if (err.isNotEmpty())
+            {
+                self->showError (T ("Merge tracks", "Flet spor"), err);
+                return;
+            }
+
+            auto d = std::make_unique<AudioDocument>();
+            d->name = T ("Merged track", "Flettet spor");
+            d->formatName = T ("Mix", "Mix");
+            d->bitDepth = 24;
+            // keep markers from all merged tracks
+            for (auto* t : valid)
+                for (auto& m : t->markers) d->markers.push_back (m);
+            d->setBuffer (std::move (mix), rate);
+            d->sortMarkers();
+            d->nextMarkerColour = (int) d->markers.size();
+            d->modified = true;
+
+            if (closeOthers)
+            {
+                self->engine.stop();
+                if (self->engine.isRecording())       // defensive: never free a recording target
+                    self->stopRecordingAndFinish();
+
+                for (auto* t : valid)
+                {
+                    int idx = -1;
+                    for (int i = 0; i < (int) self->documents.size(); ++i)
+                        if (self->documents[(size_t) i].get() == t) idx = i;
+                    if (idx < 0) continue;
+                    auto victim = std::move (self->documents[(size_t) idx]);
+                    self->documents.erase (self->documents.begin() + idx);
+                    self->currentIndex = -1;
+                    self->syncEngine();                // engine no longer references the victim
+                    victim->removeChangeListener (self);
+                }
+            }
+            self->addDocument (std::move (d));
+            self->showMessage (T ("Tracks merged", "Spor flettet") + juce::String (normalised ? T (" (level reduced to avoid clipping)", " (niveau sænket for at undgå forvrængning)") : ""));
+        };
+
+        bool discardsChanges = false;
+        if (closeOthers)
+            for (auto* t : tracks)
+                discardsChanges = discardsChanges || (t->modified && t->getLength() > 0);
+
+        if (discardsChanges)
+        {
+            juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon,
+                                                T ("Merge tracks", "Flet spor"),
+                                                T ("Some of the merged tracks have changes that are not exported. Close them anyway after merging?",
+                                                   "Nogle af de flettede spor har ændringer der ikke er eksporteret. Vil du lukke dem alligevel efter fletningen?"),
+                                                T ("Merge and close", "Flet og luk"), T ("Cancel", "Annuller"), safe.getComponent(),
+                                                juce::ModalCallbackFunction::create ([doMerge] (int r) { if (r == 1) doMerge(); }));
         }
-        safe->addDocument (std::move (d));
-        safe->showMessage (T ("Tracks merged", "Spor flettet") + juce::String (normalised ? T (" (level reduced to avoid clipping)", " (niveau sænket for at undgå forvrængning)") : ""));
+        else
+        {
+            doMerge();
+        }
     };
     launchDialog (dlg, T ("Merge tracks", "Flet spor"), this);
 }
 
-juce::AudioBuffer<float> MainComponent::mixTracks (const std::vector<AudioDocument*>& tracks, double& rateOut, bool& normalised)
+juce::AudioBuffer<float> MainComponent::mixTracks (const std::vector<AudioDocument*>& tracks, double& rateOut, bool& normalised,
+                                                   juce::String* error)
 {
-    double rate = 0.0;
-    int channels = 1;
+    // copies are made here (message thread); the heavy work happens on the copies
+    std::vector<MixPart> parts;
     for (auto* t : tracks)
     {
-        rate = juce::jmax (rate, t->sampleRate);
-        channels = juce::jmax (channels, t->getNumChannels());
-    }
-    if (rate <= 0) rate = 44100.0;
-    channels = juce::jmin (channels, 2);
-
-    std::vector<juce::AudioBuffer<float>> parts;
-    int length = 0;
-    for (auto* t : tracks)
-    {
-        auto b = t->copyRange (0, t->getLength());
-        DSP::applyEnvelope (b, *t, 0);
-        auto r = DSP::resample (b, t->sampleRate / rate);
-        auto m = DSP::matchChannels (r, channels);
-        length = juce::jmax (length, m.getNumSamples());
-        parts.push_back (std::move (m));
+        if (! fitsInt (t->getLength()))
+        {
+            if (error != nullptr) *error = tooLongMessage();
+            normalised = false;
+            rateOut = 44100.0;
+            return {};
+        }
+        MixPart p;
+        p.audio = t->copyRange (0, t->getLength());
+        DSP::applyEnvelope (p.audio, *t, 0);
+        p.rate = t->sampleRate;
+        parts.push_back (std::move (p));
     }
 
-    juce::AudioBuffer<float> mix (channels, length);
-    mix.clear();
-    for (auto& p : parts)
-        for (int c = 0; c < channels; ++c)
-            mix.addFrom (c, 0, p, c, 0, p.getNumSamples());
-
-    normalised = false;
-    if (DSP::getPeak (mix) > 1.0f)
-    {
-        DSP::normalize (mix, -0.3f);
-        normalised = true;
-    }
-    rateOut = rate;
+    juce::String err;
+    auto mix = mixParts (parts, rateOut, normalised, err);
+    if (error != nullptr) *error = err;
     return mix;
 }
 
@@ -749,17 +990,19 @@ void MainComponent::showTracksMenu()
     m.addSeparator();
     m.addItem (7, T ("Close track", "Luk spor"), current() != nullptr);
 
-    m.showMenuAsync (juce::PopupMenu::Options(), [this] (int r)
+    juce::Component::SafePointer<MainComponent> safe (this);
+    m.showMenuAsync (juce::PopupMenu::Options(), [safe] (int r)
     {
+        if (r == 0 || safe == nullptr) return;
         switch (r)
         {
-            case 1: newEmptyTrack(); break;
-            case 2: chooseFilesToOpen(); break;
-            case 3: chooseFileToInsert(); break;
-            case 4: duplicateTrack(); break;
-            case 5: renameTrack(); break;
-            case 6: showMergeDialog(); break;
-            case 7: closeDocument (currentIndex); break;
+            case 1: safe->newEmptyTrack(); break;
+            case 2: safe->chooseFilesToOpen(); break;
+            case 3: safe->chooseFileToInsert(); break;
+            case 4: safe->duplicateTrack(); break;
+            case 5: safe->renameTrack(); break;
+            case 6: safe->showMergeDialog(); break;
+            case 7: safe->closeDocument (safe->currentIndex); break;
             default: break;
         }
     });
@@ -772,14 +1015,33 @@ void MainComponent::showFileMenu()
     m.addItem (2, T ("Show file in folder", "Vis filen i mappe"), current() != nullptr && current()->file.existsAsFile());
     m.addItem (3, T ("Reset volume line", "Nulstil volumenlinje"), current() != nullptr && ! current()->envelope.empty());
     m.addItem (4, T ("Remove all markers", "Fjern alle markører"), current() != nullptr && ! current()->markers.empty());
-    m.showMenuAsync (juce::PopupMenu::Options(), [this] (int r)
+    juce::Component::SafePointer<MainComponent> safe (this);
+    m.showMenuAsync (juce::PopupMenu::Options(), [safe] (int r)
     {
-        auto* d = current();
+        if (r == 0 || safe == nullptr) return;
+        auto* d = safe->current();
         if (d == nullptr) return;
-        if (r == 1) renameTrack();
+        if (r == 1) safe->renameTrack();
         if (r == 2) d->file.revealToUser();
-        if (r == 3) { d->pushUndo (T ("Reset volume line", "Nulstil volumenlinje")); d->resetEnvelope(); d->annotationsChanged(); }
-        if (r == 4) { d->pushUndo (T ("Remove markers", "Fjern markører")); d->markers.clear(); d->annotationsChanged(); }
+        if ((r == 3 || r == 4) && safe->engine.isRecording())
+        {
+            safe->showMessage (T ("Stop the recording first.", "Stop optagelsen først."));
+            return;
+        }
+        if (r == 3 && ! d->envelope.empty())
+        {
+            d->pushUndo (T ("Reset volume line", "Nulstil volumenlinje"), true);
+            d->resetEnvelope();
+            d->annotationsChanged();
+        }
+        if (r == 4 && ! d->markers.empty())
+        {
+            d->pushUndo (T ("Remove markers", "Fjern markører"), true);
+            d->markers.clear();
+            d->annotationsChanged();
+            safe->markersPanel.refresh();
+        }
+        safe->trackStack.repaintAll();
     });
 }
 
@@ -791,6 +1053,12 @@ void MainComponent::showExportMenu()
         return;
     }
 
+    if (exportJob != nullptr)
+    {
+        showMessage (T ("An export is already running.", "En eksport kører allerede."));
+        return;
+    }
+
     auto* d = current();
     ExportDialog::Options o;
     o.hasTrack = d != nullptr && d->getLength() > 0;
@@ -798,10 +1066,26 @@ void MainComponent::showExportMenu()
     o.multipleTracks = documents.size() > 1;
     o.trackSeconds = d != nullptr ? d->getLengthSeconds() : 0.0;
     o.selectionSeconds = o.hasSelection ? d->toSeconds (d->selEnd - d->selStart) : 0.0;
-    for (auto& doc : documents) o.mixSeconds = juce::jmax (o.mixSeconds, doc->getLengthSeconds());
-    o.sampleRate = d != nullptr ? d->sampleRate : 44100.0;
-    for (auto& doc : documents) if (o.multipleTracks) o.sampleRate = juce::jmax (o.sampleRate, doc->sampleRate);
-    o.channels = d != nullptr ? juce::jmin (2, d->getNumChannels()) : 2;
+
+    // per scope format: track / selection use the current track, the mix uses the
+    // highest rate / channel count of the tracks that are actually heard
+    o.trackRate = o.selectionRate = d != nullptr ? d->sampleRate : 44100.0;
+    o.trackChannels = o.selectionChannels = d != nullptr ? juce::jlimit (1, 2, d->getNumChannels()) : 2;
+    {
+        double mixRate = 0.0;
+        int mixChannels = 0;
+        for (auto* a : audibleTracks())
+        {
+            o.mixSeconds = juce::jmax (o.mixSeconds, a->getLengthSeconds());
+            mixRate = juce::jmax (mixRate, a->sampleRate);
+            mixChannels = juce::jmax (mixChannels, juce::jlimit (1, 2, a->getNumChannels()));
+        }
+        o.mixRate = mixRate > 0 ? mixRate : 44100.0;
+        o.mixChannels = mixChannels > 0 ? mixChannels : 2;
+    }
+    // legacy fields
+    o.sampleRate = o.trackRate;
+    o.channels = o.trackChannels;
     o.trackName = d != nullptr ? d->name : juce::String ("export");
     o.lastFormatId = properties.getUserSettings()->getValue ("exportFormat", "wav24");
     o.folder = juce::File (properties.getUserSettings()->getValue ("exportDir",
@@ -822,51 +1106,90 @@ void MainComponent::showExportMenu()
 
 void MainComponent::exportAudio (int scope, const FileIO::ExportFormat& format, const juce::File& file)
 {
+    if (exportJob != nullptr)
+    {
+        showMessage (T ("An export is already running.", "En eksport kører allerede."));
+        return;
+    }
+
+    // Everything the export needs is copied here, on the message thread.
+    std::vector<MixPart> parts;
     juce::AudioBuffer<float> data;
     double rate = 44100.0;
-    bool normalised = false;
     auto* doc = current();
 
-    juce::MouseCursor::showWaitCursor();
     if (scope == 2)
     {
         // what you hear is what you get: muted tracks are left out, solo tracks win
-        std::vector<AudioDocument*> audible;
-        bool anySolo = false;
-        for (auto& dd : documents) anySolo = anySolo || dd->soloed.load();
-        for (auto& dd : documents)
-            if ((anySolo ? dd->soloed.load() : ! dd->muted.load()) && dd->getLength() > 0)
-                audible.push_back (dd.get());
-        data = mixTracks (audible, rate, normalised);
+        auto audible = audibleTracks();
+        if (audible.empty())
+        {
+            showError (T ("Export failed", "Eksport fejlede"),
+                       T ("No tracks are audible (all are muted, empty or not soloed). Unmute a track first.",
+                          "Ingen spor kan høres (alle er slået fra, tomme eller ikke solo). Slå et spor til først."));
+            return;
+        }
+        for (auto* t : audible)
+        {
+            if (! fitsInt (t->getLength()))
+            {
+                showError (T ("Export failed", "Eksport fejlede"), tooLongMessage());
+                return;
+            }
+            MixPart p;
+            p.audio = t->copyRange (0, t->getLength());
+            DSP::applyEnvelope (p.audio, *t, 0);
+            p.rate = t->sampleRate;
+            parts.push_back (std::move (p));
+        }
     }
     else if (doc != nullptr)
     {
         juce::int64 s = 0, e = doc->getLength();
         if (scope == 1 && doc->hasSelection()) { s = doc->selStart; e = doc->selEnd; }
+        if (! fitsInt (e - s))
+        {
+            showError (T ("Export failed", "Eksport fejlede"), tooLongMessage());
+            return;
+        }
         data = doc->copyRange (s, e);
         DSP::applyEnvelope (data, *doc, s);
         rate = doc->sampleRate;
     }
-
-    juce::String err;
-    bool ok = FileIO::writeBuffer (data, rate, file, format, err);
-    juce::MouseCursor::hideWaitCursor();
-
-    if (! ok)
+    else
     {
-        showError (T ("Export failed", "Eksport fejlede"), err);
         return;
     }
 
-    properties.getUserSettings()->setValue ("exportDir", file.getParentDirectory().getFullPathName());
-    properties.getUserSettings()->setValue ("exportFormat", format.id);
-    if (scope == 0 && doc != nullptr)
+    FileIO::getFormatManager();     // make sure the shared format manager is created on this thread
+
+    exportJob = std::make_unique<ExportJob> (std::move (parts), std::move (data), rate, format, file, this);
+    juce::Component::SafePointer<MainComponent> safe (this);
+    const auto formatId = format.id;
+    exportJob->onDone = [safe, scope, doc, file, formatId] (bool ok, const juce::String& err, bool normalised)
     {
-        doc->modified = false;
-        refreshTrackList();
-    }
-    showMessage (T ("Exported ", "Eksporterede ") + file.getFullPathName()
-                 + (normalised ? T (" (level reduced to avoid clipping)", " (niveau sænket for at undgå forvrængning)") : juce::String()));
+        if (safe == nullptr) return;
+        safe->exportJob.reset();
+
+        if (! ok)
+        {
+            safe->showError (T ("Export failed", "Eksport fejlede"),
+                             err.isNotEmpty() ? err : T ("The export was cancelled.", "Eksporten blev annulleret."));
+            return;
+        }
+
+        safe->properties.getUserSettings()->setValue ("exportDir", file.getParentDirectory().getFullPathName());
+        safe->properties.getUserSettings()->setValue ("exportFormat", formatId);
+        if (scope == 0 && safe->ownsDocument (doc))     // the track may have been closed meanwhile
+        {
+            doc->modified = false;
+            safe->refreshTrackList();
+            safe->trackStack.repaintAll();
+        }
+        safe->showMessage (T ("Exported ", "Eksporterede ") + file.getFullPathName()
+                           + (normalised ? T (" (level reduced to avoid clipping)", " (niveau sænket for at undgå forvrængning)") : juce::String()));
+    };
+    exportJob->launchThread();
 }
 
 void MainComponent::showSettingsMenu()
@@ -882,37 +1205,43 @@ void MainComponent::showSettingsMenu()
     m.addSeparator();
     m.addItem (3, T ("About Artilody Soundsculp", "Om Artilody Soundsculp"));
 
-    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (header.settingsButton), [this] (int r)
+    juce::Component::SafePointer<MainComponent> safe (this);
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (header.settingsButton), [safe] (int r)
     {
-        if (r == 1) showAudioSettings();
-        if (r == 2) showShortcuts();
+        if (r == 0 || safe == nullptr) return;
+        if (r == 1) safe->showAudioSettings();
+        if (r == 2) safe->showShortcuts();
         if (r == 11 || r == 12)
         {
-            properties.getUserSettings()->setValue ("language", r == 12 ? "da" : "en");
-            properties.saveIfNeeded();
+            safe->properties.getUserSettings()->setValue ("language", r == 12 ? "da" : "en");
+            safe->properties.saveIfNeeded();
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, r == 12 ? "Sprog" : "Language",
                                                     r == 12 ? juce::String::fromUTF8 ("Genstart programmet for at skifte sprog.")
                                                             : juce::String ("Restart the program to change the language."));
         }
         if (r == 3)
         {
-            auto ff = FileIO::findFFmpeg();
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Artilody Soundsculp",
                 "Artilody Soundsculp " + juce::String (JUCE_APPLICATION_VERSION_STRING) + "\n\n"
                 + T ("Simple multi-track audio editor.", "Simpel lydredigering med flere spor.") + "\n"
                 + "https://github.com/shenphenchoedron-hue/Artilody-Soundsculp\n\n"
-                + "ffmpeg: " + (ff == juce::File() ? T ("not found (MP3/M4A/Opus export disabled)", "ikke fundet (MP3/M4A/Opus-eksport slået fra)")
-                                                   : ff.getFullPathName())
-                + "\n\nLicense: GPL-3.0. Built with JUCE.");
+                + "License: GPL-3.0. Built with JUCE 8, used under the AGPLv3.\n"
+                + T ("License texts and third-party notices: THIRD_PARTY_NOTICES and the licenses folder in the installation.",
+                     "Licenstekster og tredjepartsnoter: THIRD_PARTY_NOTICES og mappen licenses i installationen."));
         }
     });
 }
 
 void MainComponent::showAudioSettings()
 {
+    if (auto* existing = audioSettingsWindow.getComponent())
+    {
+        existing->toFront (true);
+        return;
+    }
     auto* selector = new juce::AudioDeviceSelectorComponent (engine.getDeviceManager(), 0, 2, 1, 2, false, false, true, false);
     selector->setSize (520, 420);
-    launchDialog (selector, T ("Audio settings", "Lydindstillinger"), this);
+    audioSettingsWindow = launchDialog (selector, T ("Audio settings", "Lydindstillinger"), this);
 }
 
 void MainComponent::showShortcuts()
@@ -1011,6 +1340,7 @@ void MainComponent::doCopy()
 {
     if (! requireSelection (T ("Copy", "Kopiér"))) return;
     auto* d = current();
+    if (! fitsInt (d->selEnd - d->selStart)) { showError (T ("Copy", "Kopiér"), tooLongMessage()); return; }
     clipboard = d->copyRange (d->selStart, d->selEnd);
     clipboardRate = d->sampleRate;
     showMessage (T ("Copied ", "Kopierede ") + formatTime (d->toSeconds (d->selEnd - d->selStart)));
@@ -1020,6 +1350,7 @@ void MainComponent::doCut()
 {
     if (! requireSelection (T ("Cut", "Klip"))) return;
     auto* d = current();
+    if (! fitsInt (d->selEnd - d->selStart)) { showError (T ("Cut", "Klip"), tooLongMessage()); return; }
     clipboard = d->copyRange (d->selStart, d->selEnd);
     clipboardRate = d->sampleRate;
     d->pushUndo (T ("Cut", "Klip"));
@@ -1054,14 +1385,26 @@ void MainComponent::doSplit()
 {
     if (! requireDocument()) return;
     auto* d = current();
-    d->pushUndo (T ("Split", "Del"));
-    if (d->hasSelection())
+    // only positions strictly inside a clip split anything
+    auto splitsSomething = [d] (juce::int64 pos)
     {
-        d->splitAt (d->selStart);
-        d->splitAt (d->selEnd);
+        int idx = d->clipAt (pos);
+        return idx >= 0 && pos > d->clips[(size_t) idx].start && pos < d->clips[(size_t) idx].end();
+    };
+    std::vector<juce::int64> positions;
+    if (d->hasSelection()) positions = { d->selStart, d->selEnd };
+    else                   positions = { d->cursor };
+    bool any = false;
+    for (auto p : positions) any = any || splitsSomething (p);
+    if (! any)
+    {
+        showMessage (T ("Nothing to split here - place the cursor inside a clip.", "Intet at dele her - placér markøren inde i et klip."));
+        return;
     }
-    else
-        d->splitAt (d->cursor);
+
+    d->pushUndo (T ("Split", "Del"));
+    for (auto p : positions)
+        d->splitAt (p);
     d->changed();
     showMessage (T ("Split into clips. Drag a clip by its bar to move it.", "Delt i klip. Træk et klip i dets bjælke for at flytte det."));
 }
@@ -1072,34 +1415,85 @@ void MainComponent::doJoin()
     auto* d = current();
     juce::int64 s, e;
     getTargetRange (s, e);
+
+    // same rule as AudioDocument::joinRange: clips touching [s, e)
+    int touching = 0;
+    juce::int64 a = std::numeric_limits<juce::int64>::max(), b = 0;
+    for (auto& c : d->clips)
+        if (c.start < e && c.end() > s)
+        {
+            ++touching;
+            a = std::min (a, c.start);
+            b = std::max (b, c.end());
+        }
+    if (touching < 2)
+    {
+        showMessage (T ("Select at least two clips to join.", "Markér mindst to klip for at samle dem."));
+        return;
+    }
+    if (! fitsInt (b - a + 16))
+    {
+        showError (T ("Join clips", "Saml klip"), tooLongMessage());
+        return;
+    }
+
     d->pushUndo (T ("Join clips", "Saml klip"));
-    auto before = d->clips.size();
     d->joinRange (s, e);
     d->changed();
-    showMessage (before == d->clips.size() ? T ("Select at least two clips to join.", "Markér mindst to klip for at samle dem.")
-                                           : T ("Clips joined (gaps became silence).", "Klip samlet (huller blev til stilhed)."));
+    showMessage (T ("Clips joined (gaps became silence).", "Klip samlet (huller blev til stilhed)."));
 }
 
 void MainComponent::moveClipToTrack (int fromIndex, int clipIndex, int toIndex)
 {
     if (! juce::isPositiveAndBelow (fromIndex, (int) documents.size()) || ! juce::isPositiveAndBelow (toIndex, (int) documents.size()))
         return;
+    if (engine.isRecording())
+    {
+        // the recorded clip refers directly into the recorder's memory
+        showMessage (T ("Stop the recording first.", "Stop optagelsen først."));
+        return;
+    }
+    if (fromIndex == toIndex) return;
     auto* from = documents[(size_t) fromIndex].get();
     auto* to = documents[(size_t) toIndex].get();
     if (! juce::isPositiveAndBelow (clipIndex, (int) from->clips.size())) return;
 
+    const double fromRate = from->sampleRate;
+    const bool targetEmpty = to->clips.empty() && to->getLength() == 0;
+    const double targetRate = targetEmpty ? fromRate : to->sampleRate;
+    if (! fitsInt ((juce::int64) std::ceil ((double) from->clips[(size_t) clipIndex].length() * targetRate / fromRate) + 16))
+    {
+        showError (T ("Move clip", "Flyt klip"), tooLongMessage());
+        return;
+    }
+
+    // Undo on both tracks. After a drag the source also has the "Move clip" entry of the
+    // drag itself; a direct call (e.g. from a test) gets its own entry here.
+    from->pushUndo (T ("Move clip to ", "Flyt klip til ") + to->name);
+
     Clip c = from->takeClip (clipIndex);
+    {
+        // never keep a buffer that refers to memory owned by someone else
+        juce::AudioBuffer<float> owned;
+        owned.makeCopyOf (c.audio);
+        c.audio = std::move (owned);
+    }
     const double startSec = from->toSeconds (c.start);
     from->selEnd = from->selStart;
     from->changed();
 
-    if (to->clips.empty() && to->getLength() == 0)
-        to->sampleRate = from->sampleRate;
-    if (std::abs (to->sampleRate - from->sampleRate) > 0.5)
-        c.audio = DSP::resample (c.audio, from->sampleRate / to->sampleRate);
+    to->pushUndo (T ("Move clip here", "Flyt klip hertil"));     // before the format changes
+    if (targetEmpty)
+    {
+        // empty tracks adopt the format of the moved clip
+        const juce::ScopedLock sl (to->lock);
+        to->sampleRate = fromRate;
+        to->numChannels = juce::jmax (1, c.audio.getNumChannels());
+    }
+    if (std::abs (to->sampleRate - fromRate) > 0.5)
+        c.audio = DSP::resample (c.audio, fromRate / to->sampleRate);
     c.start = to->toSamples (startSec);
 
-    to->pushUndo (T ("Move clip here", "Flyt klip hertil"));
     int idx = to->addClip (std::move (c));
     to->selStart = to->clips[(size_t) idx].start;
     to->selEnd = to->clips[(size_t) idx].end();
@@ -1132,10 +1526,16 @@ void MainComponent::showWaveContextMenu (int laneIndex, juce::int64 sample)
     m.addItem (9, T ("Rename clip...", "Omdøb klip..."), clipIdx >= 0);
 
     juce::Component::SafePointer<MainComponent> safe (this);
-    m.showMenuAsync (juce::PopupMenu::Options(), [safe, clipIdx] (int r)
+    const juce::int64 menuClipStart = clipIdx >= 0 ? d->clips[(size_t) clipIdx].start : -1;
+    m.showMenuAsync (juce::PopupMenu::Options(), [safe, d, menuClipStart] (int r)
     {
-        if (safe == nullptr || safe->current() == nullptr) return;
+        if (r == 0 || safe == nullptr || safe->current() == nullptr) return;
         auto* doc = safe->current();
+        // clip indexes change when the clip list is re-sorted: find the clip again by position
+        int foundClip = -1;
+        if (doc == d && menuClipStart >= 0)
+            for (int i = 0; i < (int) doc->clips.size(); ++i)
+                if (doc->clips[(size_t) i].start == menuClipStart) foundClip = i;
         switch (r)
         {
             case 1: safe->doCut(); break;
@@ -1146,24 +1546,35 @@ void MainComponent::showWaveContextMenu (int laneIndex, juce::int64 sample)
             case 6: safe->doSplit(); break;
             case 7: safe->doJoin(); break;
             case 8:
-                if (juce::isPositiveAndBelow (clipIdx, (int) doc->clips.size()))
+                if (juce::isPositiveAndBelow (foundClip, (int) doc->clips.size()))
                 {
-                    doc->selStart = doc->clips[(size_t) clipIdx].start;
-                    doc->selEnd = doc->clips[(size_t) clipIdx].end();
+                    doc->selStart = doc->clips[(size_t) foundClip].start;
+                    doc->selEnd = doc->clips[(size_t) foundClip].end();
+                    doc->cursor = doc->selStart;
                     safe->trackStack.repaintAll();
-                    safe->updateStatus();
+                    safe->selectionChanged();
                 }
                 break;
             case 9:
-                if (juce::isPositiveAndBelow (clipIdx, (int) doc->clips.size()))
-                    askForValue (T ("Rename clip", "Omdøb klip"), T ("Name:", "Navn:"), doc->clips[(size_t) clipIdx].name,
-                                 [safe, doc, clipIdx] (const juce::String& v)
+                if (juce::isPositiveAndBelow (foundClip, (int) doc->clips.size()) && ! safe->engine.isRecording())
+                {
+                    // the clip list may change while the dialog is open: find the clip again by its position
+                    const auto clipStart = doc->clips[(size_t) foundClip].start;
+                    const auto oldName = doc->clips[(size_t) foundClip].name;
+                    askForValue (T ("Rename clip", "Omdøb klip"), T ("Name:", "Navn:"), oldName,
+                                 [safe, doc, clipStart] (const juce::String& v)
                     {
-                        if (safe == nullptr || ! juce::isPositiveAndBelow (clipIdx, (int) doc->clips.size())) return;
+                        if (safe == nullptr || ! safe->ownsDocument (doc) || safe->engine.isRecording()) return;
+                        int idx = -1;
+                        for (int i = 0; i < (int) doc->clips.size(); ++i)
+                            if (doc->clips[(size_t) i].start == clipStart) idx = i;
+                        if (idx < 0 || doc->clips[(size_t) idx].name == v.trim()) return;
                         doc->pushUndo (T ("Rename clip", "Omdøb klip"));
-                        doc->clips[(size_t) clipIdx].name = v.trim();
+                        doc->clips[(size_t) idx].name = v.trim();
                         doc->annotationsChanged();
+                        safe->trackStack.repaintAll();
                     });
+                }
                 break;
             default: break;
         }
@@ -1175,16 +1586,32 @@ void MainComponent::insertBufferAtCursor (juce::AudioBuffer<float> data, double 
                                           const juce::String& clipName)
 {
     auto* d = current();
-    if (d == nullptr || data.getNumSamples() == 0) return;
+    if (d == nullptr || data.getNumSamples() == 0 || engine.isRecording() || rate <= 0) return;
+
+    const double targetRate = d->clips.empty() ? rate : d->sampleRate;
+    if (! fitsInt ((juce::int64) std::ceil ((double) data.getNumSamples() * targetRate / rate) + 16))
+    {
+        showError (undoName, tooLongMessage());
+        return;
+    }
 
     d->pushUndo (undoName);
 
     // Empty tracks adopt the inserted material's format
     if (d->clips.empty())
     {
-        const juce::ScopedLock sl (d->lock);
-        d->sampleRate = rate;
-        d->numChannels = juce::jmax (1, data.getNumChannels());
+        // cursor / selection are in samples: keep their time position across the rate change
+        const double cursorSec = d->toSeconds (d->cursor);
+        const double selStartSec = d->toSeconds (d->selStart);
+        const double selEndSec = d->toSeconds (d->selEnd);
+        {
+            const juce::ScopedLock sl (d->lock);
+            d->sampleRate = rate;
+            d->numChannels = juce::jmax (1, data.getNumChannels());
+        }
+        d->cursor = d->toSamples (cursorSec);
+        d->selStart = d->toSamples (selStartSec);
+        d->selEnd = d->toSamples (selEndSec);
     }
     if (std::abs (rate - d->sampleRate) > 0.5)
         data = DSP::resample (data, rate / d->sampleRate);
@@ -1223,6 +1650,12 @@ void MainComponent::applyToRange (const juce::String& undoName, juce::int64 s, j
                                   const std::function<void (juce::AudioBuffer<float>&, juce::int64)>& fn)
 {
     auto* d = current();
+    if (d == nullptr) return;
+    if (e <= s || ! d->hasAudioIn (s, e))
+    {
+        showMessage (undoName + ": " + T ("there is no audio here.", "der er ingen lyd her."));
+        return;
+    }
     d->pushUndo (undoName);
     d->processRange (s, e, fn);
     d->changed();
@@ -1264,6 +1697,7 @@ void MainComponent::doNormalize()
     auto* d = current();
     juce::int64 s, e;
     getTargetRange (s, e);
+    if (! fitsInt (e - s)) { showError (T ("Normalize", "Normalisér"), tooLongMessage()); return; }
     auto before = DSP::getPeak (d->copyRange (s, e));
     if (before <= 1.0e-6f) { showMessage (T ("Nothing to normalize (silence).", "Intet at normalisere (stilhed).")); return; }
     const float gain = juce::Decibels::decibelsToGain (-0.1f) / before;
@@ -1281,9 +1715,26 @@ void MainComponent::doSilenceTrim()
                     "Fjerner stilhed i starten og slutningen af hvert klip (i markeringen, eller alle klip).\nTærskel i dB (fx -50):"),
                  "-50", [safe] (const juce::String& v)
     {
-        if (safe == nullptr || safe->current() == nullptr) return;
+        if (safe == nullptr || safe->current() == nullptr || safe->engine.isRecording()) return;
         auto* d = safe->current();
-        auto thr = juce::jlimit (-120.0f, 0.0f, v.replaceCharacter (',', '.').getFloatValue());
+
+        // accept only plain numbers between -120 and -6 dB, otherwise use the default -50 dB
+        float thr = -50.0f;
+        bool thresholdOk = false;
+        {
+            auto text = v.trim().replaceCharacter (',', '.');
+            if (text.endsWithIgnoreCase ("db")) text = text.dropLastCharacters (2).trim();
+            if (text.isNotEmpty() && text.containsOnly ("-+0123456789.") && text.containsAnyOf ("0123456789"))
+            {
+                auto value = text.getFloatValue();
+                if (value <= -6.0f && value >= -120.0f) { thr = value; thresholdOk = true; }
+            }
+        }
+        juce::String thresholdNote;
+        if (! thresholdOk)
+            thresholdNote = T ("Invalid threshold (use a number from -120 to -6 dB) - used -50 dB. ",
+                               "Ugyldig tærskel (brug et tal fra -120 til -6 dB) - brugte -50 dB. ");
+
         juce::int64 s, e;
         safe->getTargetRange (s, e);
         auto margin = d->toSamples (0.005);
@@ -1306,13 +1757,13 @@ void MainComponent::doSilenceTrim()
         }
         double removed = 0;
         for (auto& r : cuts) removed += d->toSeconds (r.second - r.first);
-        if (removed <= 0.0005) { safe->showMessage (T ("No silence found.", "Ingen stilhed fundet.")); return; }
+        if (removed <= 0.0005) { safe->showMessage (thresholdNote + T ("No silence found.", "Ingen stilhed fundet.")); return; }
 
         d->pushUndo (T ("Silence trim", "Stilhedstrim"));
         for (auto& r : cuts) d->removeRange (r.first, r.second);
         d->selEnd = d->selStart;
         d->changed();
-        safe->showMessage (T ("Removed ", "Fjernede ") + juce::String (removed, 2) + T (" s of silence", " s stilhed"));
+        safe->showMessage (thresholdNote + T ("Removed ", "Fjernede ") + juce::String (removed, 2) + T (" s of silence", " s stilhed"));
     });
 }
 
@@ -1324,31 +1775,62 @@ void MainComponent::doLoopTool()
                                         "Hvor mange gange skal markeringen spilles i alt? (2-100)"),
                  "4", [safe] (const juce::String& v)
     {
-        if (safe == nullptr || safe->current() == nullptr) return;
+        if (safe == nullptr || safe->current() == nullptr || safe->engine.isRecording()) return;
         auto* d = safe->current();
+        if (! d->hasSelection()) return;
         int n = juce::jlimit (2, 100, v.getIntValue());
+        if ((d->selEnd - d->selStart) * n > (juce::int64) std::numeric_limits<int>::max() / 2)
+        {
+            safe->showError (T ("Loop", "Loop"), tooLongMessage());
+            return;
+        }
         auto seg = d->copyRange (d->selStart, d->selEnd);
-        if ((juce::int64) seg.getNumSamples() * n > std::numeric_limits<int>::max() / 2) return;
+        const int L = seg.getNumSamples();
+        const int chans = seg.getNumChannels();
 
-        // tiny crossfade at the joints to avoid clicks
-        const int xf = juce::jmin (seg.getNumSamples() / 4, (int) (d->sampleRate * 0.003));
-        juce::AudioBuffer<float> out (seg.getNumChannels(), seg.getNumSamples() * (n - 1));
-        for (int i = 0; i < n - 1; ++i)
-            for (int c = 0; c < seg.getNumChannels(); ++c)
+        // Equal-power crossfade at every joint: the tail of repeat i overlaps the head of
+        // repeat i+1 (no level dip, no click). Each joint shortens the result by xf samples.
+        const int xf = juce::jmin (L / 4, (int) (d->sampleRate * 0.01));
+        juce::AudioBuffer<float> joint (chans, juce::jmax (1, xf));     // tail(i) x head(i+1)
+        joint.clear();
+        for (int c = 0; c < chans; ++c)
+            for (int k = 0; k < xf; ++k)
             {
-                out.copyFrom (c, i * seg.getNumSamples(), seg, c, 0, seg.getNumSamples());
-                if (xf > 0)
-                {
-                    auto* p = out.getWritePointer (c, i * seg.getNumSamples());
-                    for (int k = 0; k < xf; ++k) p[k] *= (float) k / (float) xf;
-                }
+                const double a = ((double) k + 0.5) / (double) xf * juce::MathConstants<double>::halfPi;
+                joint.setSample (c, k, seg.getSample (c, L - xf + k) * (float) std::cos (a)
+                                         + seg.getSample (c, k) * (float) std::sin (a));
             }
+
+        // repeats 2..n: each starts after the crossfaded head and (except the last) ends with the next joint
+        const int step = L - xf;
+        juce::AudioBuffer<float> out (chans, step * (n - 1));
+        for (int r = 0; r < n - 1; ++r)
+            for (int c = 0; c < chans; ++c)
+            {
+                out.copyFrom (c, r * step, seg, c, xf, step);
+                if (xf > 0 && r < n - 2)
+                    out.copyFrom (c, r * step + step - xf, joint, c, 0, xf);
+            }
+
         const auto selS = d->selStart, selE = d->selEnd;
+        const auto added = (juce::int64) out.getNumSamples();
         d->pushUndo (T ("Loop", "Loop"));
         d->insertClip (selE, std::move (out), {});        // the repeats follow the selection, later audio moves right
-        d->joinRange (selS, selE + seg.getNumSamples() * (n - 1));
+        d->joinRange (selS, selE + added);
+        if (xf > 0)
+        {
+            // first joint: the end of the original selection fades into the first repeat
+            const auto js = selE - xf;
+            d->processRange (js, selE, [&joint, js] (juce::AudioBuffer<float>& b, juce::int64 absStart)
+            {
+                const int off = (int) (absStart - js);
+                for (int c = 0; c < b.getNumChannels(); ++c)
+                    b.copyFrom (c, 0, joint, juce::jmin (c, joint.getNumChannels() - 1), off, b.getNumSamples());
+            });
+        }
         d->selStart = selS;
-        d->selEnd = selE + (juce::int64) seg.getNumSamples() * (n - 1);
+        d->selEnd = selE + added;
+        d->cursor = selS;
         d->changed();
         safe->showMessage (T ("Selection repeated ", "Markeringen gentaget ") + juce::String (n) + T (" times", " gange"));
     });
@@ -1357,7 +1839,6 @@ void MainComponent::doLoopTool()
 void MainComponent::doReverse()
 {
     if (! requireDocument()) return;
-    auto* d = current();
     juce::int64 s, e;
     getTargetRange (s, e);
     applyToRange (T ("Reverse", "Baglæns"), s, e, [] (juce::AudioBuffer<float>& b, juce::int64) { DSP::reverse (b); });
@@ -1370,14 +1851,15 @@ void MainComponent::doPitch()
     juce::Component::SafePointer<MainComponent> safe (this);
     dlg->onPreview = [safe] (double st) { if (safe != nullptr) safe->previewPitch (st); };
     dlg->onApply = [safe] (double st) { if (safe != nullptr) safe->applyPitch (st); };
-    dlg->onStopPreview = [safe] { if (safe != nullptr) safe->engine.stop(); };
+    // also called from the dialog's destructor: only stop a running preview, never normal playback
+    dlg->onStopPreview = [safe] { if (safe != nullptr && safe->engine.isPreviewing()) safe->engine.stop(); };
     launchDialog (dlg, T ("Pitch", "Tone"), this);
 }
 
 void MainComponent::previewPitch (double semitones)
 {
     auto* d = current();
-    if (d == nullptr) return;
+    if (d == nullptr || engine.isRecording()) return;
     juce::int64 s, e;
     getTargetRange (s, e);
     e = juce::jmin (e, s + d->toSamples (10.0));
@@ -1390,7 +1872,7 @@ void MainComponent::previewPitch (double semitones)
 void MainComponent::applyPitch (double semitones)
 {
     auto* d = current();
-    if (d == nullptr || std::abs (semitones) < 0.01) return;
+    if (d == nullptr || std::abs (semitones) < 0.01 || engine.isRecording()) return;
     juce::int64 s, e;
     getTargetRange (s, e);
     juce::MouseCursor::showWaitCursor();
@@ -1405,32 +1887,75 @@ void MainComponent::applyEQ()
     auto* d = current();
     juce::int64 s, e;
     getTargetRange (s, e);
+    if (e <= s || ! d->hasAudioIn (s, e))
+    {
+        showMessage ("EQ: " + T ("there is no audio here.", "der er ingen lyd her."));
+        return;
+    }
+    if (! fitsInt (e - s)) { showError ("EQ", tooLongMessage()); return; }
+
+    // Filter the whole range in one go (continuous across clips and gaps), then apply
+    // one common anti-clip gain so the clips keep their relative levels.
     auto settings = eqPanel.getSettings();
-    const double rate = d->sampleRate;
-    applyToRange ("EQ", s, e, [settings, rate] (juce::AudioBuffer<float>& b, juce::int64) { DSP::applyEQ (b, rate, settings); });
+    juce::MouseCursor::showWaitCursor();
+    auto processed = d->copyRange (s, e);           // plain audio (the volume line is not included)
+    DSP::applyEQ (processed, d->sampleRate, settings);
+    const float peak = DSP::getPeak (processed);
+    const bool reduced = peak > 1.0f;
+    if (reduced)
+        processed.applyGain (0.999f / peak);
+
+    d->pushUndo ("EQ");
+    d->processRange (s, e, [&processed, s] (juce::AudioBuffer<float>& b, juce::int64 absStart)
+    {
+        const int offset = (int) (absStart - s);
+        const int n = juce::jmin (b.getNumSamples(), processed.getNumSamples() - offset);
+        if (n <= 0) return;
+        for (int c = 0; c < b.getNumChannels(); ++c)
+            b.copyFrom (c, 0, processed, juce::jmin (c, processed.getNumChannels() - 1), offset, n);
+    });
+    d->changed();
+    juce::MouseCursor::hideWaitCursor();
     showMessage (T ("EQ applied. Turn the EQ switch off to avoid hearing it twice.",
-                    "EQ anvendt. Slå EQ-kontakten fra for ikke at høre den to gange."));
+                    "EQ anvendt. Slå EQ-kontakten fra for ikke at høre den to gange.")
+                 + (reduced ? T (" (level reduced to avoid clipping)", " (niveau sænket for at undgå forvrængning)") : juce::String()));
 }
 
 void MainComponent::learnNoise()
 {
     if (! requireSelection (T ("Learn noise profile", "Lær støjprofil")))
     {
-        noisePanel.setLearnedProfile ({});
+        noisePanel.setLearnedProfile ({}, current() != nullptr ? current()->sampleRate : 48000.0);
         return;
     }
     auto* d = current();
-    noisePanel.setLearnedProfile (DSP::learnNoiseProfile (d->copyRange (d->selStart, d->selEnd)));
+    const auto e = juce::jmin (d->selEnd, d->selStart + d->toSamples (60.0));
+    noisePanel.setLearnedProfile (DSP::learnNoiseProfile (d->copyRange (d->selStart, e)), d->sampleRate);
     showMessage (T ("Noise profile learned from the selection. Now select what to clean (or nothing for the whole track) and press Apply.",
                     "Støjprofil lært fra markeringen. Markér nu det der skal renses (eller intet for hele sporet) og tryk Anvend."));
 }
 
 std::vector<float> MainComponent::getNoiseProfile()
 {
-    if (noisePanel.hasLearnedProfile())
+    // a learned profile is only used when it is switched on and matches this track's rate
+    if (noisePanel.isUsingLearnedProfile())
         return noisePanel.getLearnedProfile();
     auto* d = current();
-    return DSP::estimateNoiseProfile (d->copyRange (0, juce::jmin (d->getLength(), d->toSamples (60.0))));
+    if (d == nullptr) return {};
+    // otherwise estimate from the material the display analyses: the selection, or the start of the track
+    juce::int64 s, e;
+    getNoiseMaterialRange (s, e, 60.0);
+    return DSP::estimateNoiseProfile (d->copyRange (s, e));
+}
+
+void MainComponent::getNoiseMaterialRange (juce::int64& s, juce::int64& e, double maxSeconds) const
+{
+    auto* d = current();
+    s = e = 0;
+    if (d == nullptr) return;
+    if (d->hasSelection()) { s = d->selStart; e = d->selEnd; }
+    else                   { s = 0; e = d->getLength(); }
+    e = juce::jmin (e, s + d->toSamples (maxSeconds));
 }
 
 void MainComponent::previewNoise()
@@ -1450,7 +1975,6 @@ void MainComponent::previewNoise()
 void MainComponent::applyNoise()
 {
     if (! requireDocument()) return;
-    auto* d = current();
     engine.stop();
     juce::int64 s, e;
     getTargetRange (s, e);
@@ -1466,16 +1990,22 @@ void MainComponent::applyNoise()
 
 void MainComponent::updateNoiseMaterial()
 {
+    // called on every selection change (mouse drags): coalesce, copy once things settle
+    if (! noisePanel.isVisible()) return;
+    noiseMaterialTimer.startTimer (200);
+}
+
+void MainComponent::updateNoiseMaterialNow()
+{
     if (! noisePanel.isVisible()) return;
     auto* d = current();
-    if (d == nullptr || d->getLength() == 0)
+    if (d == nullptr || d->getLength() == 0 || engine.isRecording())
     {
         noisePanel.setAnalysisMaterial ({});
         return;
     }
     juce::int64 s, e;
-    getTargetRange (s, e);
-    e = juce::jmin (e, s + d->toSamples (8.0));
+    getNoiseMaterialRange (s, e, 8.0);
     noisePanel.setAnalysisMaterial (d->copyRange (s, e));
 }
 
@@ -1483,7 +2013,7 @@ void MainComponent::addMarkerAtCursor()
 {
     if (! requireDocument()) return;
     auto* d = current();
-    d->pushUndo (T ("Add marker", "Tilføj markør"));
+    d->pushUndo (T ("Add marker", "Tilføj markør"), true);
     double t = engine.isPlaying() ? engine.getPosition() : d->toSeconds (d->cursor);
     int idx = d->addMarker (t);
     d->annotationsChanged();
@@ -1539,19 +2069,36 @@ void MainComponent::stop()
 {
     if (engine.isRecording())
     {
-        engine.stopRecording();
-        if (auto* d = current())
-        {
-            d->modified = true;
-            d->clearHistory();
-            zoomFit();
-        }
-        refreshAll();
-        showMessage (T ("Recording finished", "Optagelse afsluttet"));
+        stopRecordingAndFinish();
         return;
     }
     engine.stop();
     trackStack.repaintAll();
+}
+
+void MainComponent::stopRecordingAndFinish()
+{
+    if (! engine.isRecording()) return;
+    finishRecording (engine.stopRecording());
+}
+
+void MainComponent::finishRecording (AudioDocument* recorded)
+{
+    // The bookkeeping belongs to the recorded track, which need not be the current one.
+    if (ownsDocument (recorded))
+    {
+        recorded->modified = recorded->getLength() > 0;
+        recorded->clearHistory();
+        recorded->cursor = recorded->selStart = recorded->selEnd = 0;
+    }
+    zoomFit();
+    refreshAll();
+
+    if (engine.hadRecordingOverflow())
+        showError (T ("Recording", "Optagelse"),
+                   T ("Some audio could not be recorded in time (buffer overflow), so the recording may contain gaps.",
+                      "Noget lyd kunne ikke optages i tide (buffer-overløb), så optagelsen kan have huller."));
+    showMessage (T ("Recording finished", "Optagelse afsluttet"));
 }
 
 void MainComponent::goToStart()
@@ -1623,6 +2170,12 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     const auto mods = key.getModifiers();
 
     if (key == juce::KeyPress::spaceKey)                           { togglePlay(); return true; }
+
+    // No edits/undo while a mouse drag is in progress: they would change the clip/marker/envelope
+    // lists under the drag (stale indexes, lost undo entries).
+    if (juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown())
+        return true;
+
     if (key == juce::KeyPress::homeKey)                            { goToStart(); return true; }
     if ((key.isKeyCode (juce::KeyPress::deleteKey) || key.isKeyCode (juce::KeyPress::backspaceKey)) && mods.isShiftDown()) { doRippleDelete(); return true; }
     if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey) { doDelete(); return true; }
@@ -1639,7 +2192,14 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (key == juce::KeyPress ('e', cmd, 0))                       { showExportMenu(); return true; }
     if (key == juce::KeyPress ('a', cmd, 0))
     {
-        if (auto* d = current()) { d->selStart = 0; d->selEnd = d->getLength(); trackStack.repaintAll(); updateStatus(); updateLoopRange(); }
+        if (auto* d = current())
+        {
+            d->selStart = 0;
+            d->selEnd = d->getLength();
+            d->cursor = 0;
+            trackStack.repaintAll();
+            selectionChanged();
+        }
         return true;
     }
     if (! mods.isCommandDown() && ! mods.isAltDown())
@@ -1680,16 +2240,15 @@ void MainComponent::timerCallback()
     }
     else if (engine.isRecording())
     {
-        if (d != nullptr)
+        if (auto* rec = engine.getRecordTarget())     // follow the recorded track, not the selected one
         {
             updateTimelineTotal();
-            if (d->getLengthSeconds() > timeline.startSec + timeline.visibleSec() * 0.95)
-                timeline.scrollTo (d->getLengthSeconds() - timeline.visibleSec() * 0.7);
+            if (rec->getLengthSeconds() > timeline.startSec + timeline.visibleSec() * 0.95)
+                timeline.scrollTo (rec->getLengthSeconds() - timeline.visibleSec() * 0.7);
         }
         trackStack.repaintAll();
     }
 
-    static bool wasPlaying = false;
     if (wasPlaying && ! playing) trackStack.repaintAll();
     wasPlaying = playing;
 
@@ -1717,7 +2276,7 @@ void MainComponent::updateStatus()
     juce::String fmt = juce::String (d->sampleRate / 1000.0, 1) + " kHz   |   " + juce::String (d->bitDepth) + " bit   |   "
                        + (d->getNumChannels() == 1 ? "Mono" : (d->getNumChannels() == 2 ? "Stereo" : juce::String (d->getNumChannels()) + " ch"));
     double cursorT = engine.isPlaying() ? engine.getPosition() : d->toSeconds (d->cursor);
-    if (engine.isRecording()) cursorT = d->getLengthSeconds();
+    if (engine.isRecording() && engine.getRecordTarget() == d) cursorT = d->getLengthSeconds();
     statusBar.setInfo (fmt, formatTime (cursorT), d->hasSelection() ? sel : juce::String ("-"), selLen, transientMessage);
 }
 
@@ -2035,7 +2594,6 @@ int MainComponent::runSelfTest()
         dir.createDirectory();
         for (auto& f : FileIO::getExportFormats())
         {
-            if (f.needsFFmpeg && FileIO::findFFmpeg() == juce::File()) continue;
             auto file = dir.getChildFile ("t_" + f.id + "." + f.extension);
             juce::String err;
             bool ok = FileIO::writeBuffer (b, sr, file, f, err);
@@ -2045,6 +2603,9 @@ int MainComponent::runSelfTest()
             check (ok && loaded && std::abs (len - 1.0) < 0.1, "export+import " + f.name + " (" + juce::String (len, 3) + " s) " + err);
         }
         dir.deleteRecursively();
+
+        // MP3 files are opened with JUCE's built-in decoder (JUCE_USE_MP3AUDIOFORMAT)
+        check (FileIO::getWildcardForOpen().contains ("*.mp3"), "MP3 files can be opened");
     }
 
     std::cout << (failures == 0 ? "ALL TESTS PASSED" : juce::String (failures) + " TEST(S) FAILED") << std::endl;

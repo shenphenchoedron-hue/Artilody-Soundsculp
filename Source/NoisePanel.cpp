@@ -14,6 +14,7 @@ void SpectrumView::paint (juce::Graphics& g)
     g.fillRoundedRectangle (b, 8.0f);
 
     auto r = b.withTrimmedLeft (30).withTrimmedBottom (18).withTrimmedTop (22).withTrimmedRight (8);
+    if (r.getWidth() <= 1.0f || r.getHeight() <= 1.0f) return;
     const float minDb = -90.0f, maxDb = 0.0f;
     auto xForF = [&] (float f) { return r.getX() + r.getWidth() * std::log10 (juce::jmax (20.0f, f) / 20.0f) / 3.0f; };
     auto yForDb = [&] (float db) { return juce::jmap (juce::jlimit (minDb, maxDb, db), maxDb, minDb, r.getY(), r.getBottom()); };
@@ -46,13 +47,23 @@ void SpectrumView::paint (juce::Graphics& g)
     drawLegend (juce::Colours::grey, T ("Original", "Original"), b.getCentreX() - 90);
     drawLegend (Theme::waveB, T ("Filtered", "Filtreret"), b.getCentreX() + 10);
 
+    // nothing exists above Nyquist at this sample rate
+    const float nyquist = (float) (sampleRate * 0.5);
+    const float specRight = nyquist < 20000.0f ? juce::jmax (r.getX(), xForF (nyquist)) : r.getRight();
+    if (specRight < r.getRight())
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.fillRect (juce::Rectangle<float> (specRight, r.getY(), r.getRight() - specRight, r.getHeight()));
+    }
+
     auto drawSpec = [&] (const std::vector<float>& s, juce::Colour c, bool fill)
     {
         if (s.size() < 4) return;
-        const float binHz = 44100.0f / (float) ((s.size() - 1) * 2);
+        const float binHz = (float) sampleRate / (float) ((s.size() - 1) * 2);
         juce::Path p;
         bool started = false;
-        for (float x = r.getX(); x <= r.getRight(); x += 1.5f)
+        float lastX = r.getX();
+        for (float x = r.getX(); x <= specRight; x += 1.5f)
         {
             float f = 20.0f * std::pow (10.0f, 3.0f * (x - r.getX()) / r.getWidth());
             auto bin = juce::jlimit<size_t> (1, s.size() - 1, (size_t) (f / binHz));
@@ -63,11 +74,13 @@ void SpectrumView::paint (juce::Graphics& g)
             for (auto k = bin; k <= bin2; ++k) v = juce::jmax (v, s[k]);
             auto y = yForDb (v);
             if (! started) { p.startNewSubPath (x, y); started = true; } else p.lineTo (x, y);
+            lastX = x;
         }
+        if (! started) return;
         if (fill)
         {
             juce::Path f (p);
-            f.lineTo (r.getRight(), r.getBottom());
+            f.lineTo (lastX, r.getBottom());
             f.lineTo (r.getX(), r.getBottom());
             f.closeSubPath();
             g.setColour (c.withAlpha (0.25f));
@@ -88,6 +101,13 @@ void SpectrumView::paint (juce::Graphics& g)
         g.setColour (juce::Colours::white.withAlpha (0.5f));
         g.drawText (T ("No audio", "Ingen lyd"), r, juce::Justification::centred);
     }
+
+    if (hint.isNotEmpty())
+    {
+        g.setColour (Theme::envelope);
+        g.setFont (Theme::font (12.0f));
+        g.drawFittedText (hint, r.reduced (6.0f, 4.0f).toNearestInt().removeFromTop (32), juce::Justification::topLeft, 2);
+    }
 }
 
 //==============================================================================
@@ -99,7 +119,7 @@ NoisePanel::NoisePanel()
                                 "Til: brug støjprofilen lært fra en markering (menu ... > Lær støjprofil). Fra: støjen estimeres automatisk."));
     enableSwitch.onClick = [this]
     {
-        if (enableSwitch.getToggleState() && learnedProfile.empty() && onLearn)
+        if (enableSwitch.getToggleState() && (learnedProfile.empty() || ! learnedRateMatches()) && onLearn)
             onLearn();
         scheduleUpdate();
     };
@@ -172,11 +192,43 @@ DSP::NoiseParams NoisePanel::getParams() const
     return p;
 }
 
-void NoisePanel::setLearnedProfile (std::vector<float> p)
+void NoisePanel::setLearnedProfile (std::vector<float> p, double rate)
 {
     learnedProfile = std::move (p);
+    learnedRate = learnedProfile.empty() ? 0.0 : (rate > 0.0 ? rate : sampleRate);
     enableSwitch.setToggleState (! learnedProfile.empty(), juce::dontSendNotification);
+    updateHint();
     scheduleUpdate();
+}
+
+bool NoisePanel::learnedRateMatches() const
+{
+    return std::abs (learnedRate - sampleRate) < 0.5;
+}
+
+bool NoisePanel::isUsingLearnedProfile() const
+{
+    return enableSwitch.getToggleState() && ! learnedProfile.empty() && learnedRateMatches();
+}
+
+void NoisePanel::setSampleRate (double sr)
+{
+    if (! (sr > 0.0) || sr == sampleRate) return;
+    sampleRate = sr;
+    spectrum.setSampleRate (sr);
+    updateHint();
+    scheduleUpdate();
+}
+
+void NoisePanel::updateHint()
+{
+    if (enableSwitch.getToggleState() && ! learnedProfile.empty() && ! learnedRateMatches())
+        spectrum.setHint (T ("The learned noise profile was made at ", "Den lærte støjprofil blev lavet ved ")
+                          + juce::String (learnedRate / 1000.0, 1) + " kHz"
+                          + T (" - this track uses the automatic estimate. Learn again to use a profile.",
+                               " - dette spor bruger det automatiske estimat. Lær igen for at bruge en profil."));
+    else
+        spectrum.setHint ({});
 }
 
 void NoisePanel::setAnalysisMaterial (juce::AudioBuffer<float>&& m)
@@ -188,14 +240,16 @@ void NoisePanel::setAnalysisMaterial (juce::AudioBuffer<float>&& m)
 void NoisePanel::timerCallback()
 {
     stopTimer();
+    updateHint();
     if (material.getNumSamples() < 4096)
     {
         spectrum.setSpectra ({}, {});
         return;
     }
 
-    auto profile = (enableSwitch.getToggleState() && ! learnedProfile.empty()) ? learnedProfile
-                                                                                : DSP::estimateNoiseProfile (material);
+    // same choice as the owner makes for Preview / Apply
+    auto profile = isUsingLearnedProfile() ? learnedProfile
+                                           : DSP::estimateNoiseProfile (material);
     auto params = getParams();
     params.outputNoiseOnly = false;
     auto filtered = DSP::reduceNoise (material, profile, params);

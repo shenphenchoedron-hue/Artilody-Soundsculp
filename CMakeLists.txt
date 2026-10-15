@@ -1,13 +1,18 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(ArtilodySoundsculp VERSION 1.1.2 LANGUAGES C CXX)
+# Must be set before project(), otherwise the first configure ignores it.
+# (Has no effect on non-Apple platforms.)
+set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
+
+# Windows: link the MSVC runtime statically (/MT, /MTd) so the app and the
+# portable zip run without the Visual C++ Redistributable. Policy CMP0091 is NEW
+# because of cmake_minimum_required(3.22); must be set before JUCE is added.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+project(ArtilodySoundsculp VERSION 1.1.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-if(APPLE)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS version")
-endif()
 
 # ---------------------------------------------------------------------------
 # JUCE: use a local checkout if JUCE_DIR is given, otherwise download it.
@@ -18,6 +23,11 @@ if(JUCE_DIR)
     add_subdirectory(${JUCE_DIR} ${CMAKE_BINARY_DIR}/JUCE EXCLUDE_FROM_ALL)
 else()
     include(FetchContent)
+    # Single-argument FetchContent_Populate() is deprecated since CMake 3.30;
+    # keep using it (we need EXCLUDE_FROM_ALL, see below) without the warning.
+    if(POLICY CMP0169)
+        cmake_policy(SET CMP0169 OLD)
+    endif()
     FetchContent_Declare(JUCE
         GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
         GIT_TAG        8.0.4
@@ -39,6 +49,7 @@ juce_add_gui_app(ArtilodySoundsculp
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon.png"
     MICROPHONE_PERMISSION_ENABLED TRUE
     MICROPHONE_PERMISSION_TEXT "Artilody Soundsculp needs microphone access to record audio."
+    # Only used for the macOS Info.plist; m4a is opened there via Core Audio.
     DOCUMENT_EXTENSIONS wav flac ogg mp3 aiff aif m4a
 )
 
@@ -75,7 +86,6 @@ target_compile_definitions(ArtilodySoundsculp PRIVATE
     JUCE_USE_FLAC=1
     JUCE_USE_OGGVORBIS=1
     JUCE_USE_WINDOWS_MEDIA_FORMAT=1
-    JUCE_DISPLAY_SPLASH_SCREEN=0
 )
 
 target_link_libraries(ArtilodySoundsculp
@@ -112,14 +122,13 @@ if(UNIX AND NOT APPLE)
             RENAME com.artilody.soundsculp.png)
     install(PROGRAMS packaging/linux/artilody-soundsculp
             DESTINATION ${CMAKE_INSTALL_BINDIR})
-    install(DIRECTORY docs/pdf/ DESTINATION ${CMAKE_INSTALL_DOCDIR} OPTIONAL)
 
-    # Bundle a static ffmpeg (MP3/M4A/Opus export, extra import formats) so the
-    # package does not depend on any third-party download.
-    set(BUNDLE_FFMPEG "" CACHE FILEPATH "Static ffmpeg executable to include in the package")
-    if(BUNDLE_FFMPEG AND EXISTS "${BUNDLE_FFMPEG}")
-        install(PROGRAMS "${BUNDLE_FFMPEG}" DESTINATION lib/artilody-soundsculp RENAME ffmpeg)
-    endif()
+    # Documentation, licenses and notices -> /usr/share/doc/artilody-soundsculp
+    set(SOUNDSCULP_DOCDIR "${CMAKE_INSTALL_DATADIR}/doc/artilody-soundsculp")
+    install(DIRECTORY docs/pdf/ DESTINATION ${SOUNDSCULP_DOCDIR} OPTIONAL)
+    install(FILES packaging/linux/copyright LICENSE THIRD_PARTY_NOTICES.md
+            DESTINATION ${SOUNDSCULP_DOCDIR})
+    install(DIRECTORY packaging/licenses/ DESTINATION ${SOUNDSCULP_DOCDIR}/licenses)
 
     set(CPACK_GENERATOR "DEB")
     set(CPACK_STRIP_FILES ON)
@@ -128,9 +137,13 @@ if(UNIX AND NOT APPLE)
     set(CPACK_PACKAGE_VENDOR "Artilody")
     set(CPACK_PACKAGE_CONTACT "Artilody <shenphenchoedron-hue@users.noreply.github.com>")
     set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Artilody Soundsculp - simple audio editor")
-    set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "Simple multi-file audio editor with trim, cut/paste, fades,\n normalize, silence trim, loop, reverse, pitch shift, parametric EQ,\n noise remover, volume envelopes, text markers and export to many formats.")
+    set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "Simple multi-file audio editor with trim, cut/paste, fades,\n normalize, silence trim, loop, reverse, pitch shift, parametric EQ,\n noise remover, volume envelopes, text markers and export to WAV, AIFF,\n FLAC and Ogg Vorbis.")
     set(CPACK_DEBIAN_PACKAGE_SECTION "sound")
     set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+    # Linked libraries are detected by dpkg-shlibdeps (needs dpkg-dev); the X11
+    # libraries below are loaded at runtime with dlopen() by JUCE, so they must
+    # stay listed explicitly.
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "libasound2 | libasound2t64, libfreetype6, libfontconfig1, libx11-6, libxext6, libxrandr2, libxinerama1, libxcursor1")
     set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/shenphenchoedron-hue/Artilody-Soundsculp")
     set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")

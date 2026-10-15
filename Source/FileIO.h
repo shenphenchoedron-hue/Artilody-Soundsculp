@@ -9,16 +9,12 @@ namespace FileIO
     juce::AudioFormatManager& getFormatManager();
     juce::String getWildcardForOpen();
 
-    // Locates an ffmpeg executable (bundled next to the app first, then the PATH).
-    juce::File findFFmpeg();
-
     bool loadIntoDocument (const juce::File& file, AudioDocument& doc, juce::String& error);
 
     struct ExportFormat
     {
         juce::String id, name, extension;
         int bitDepth = 24;
-        bool needsFFmpeg = false;
     };
     const std::vector<ExportFormat>& getExportFormats();
 

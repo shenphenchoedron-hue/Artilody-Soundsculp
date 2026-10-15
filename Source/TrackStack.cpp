@@ -98,8 +98,9 @@ TrackLane::TrackLane (AudioEngine& engine, Timeline& timeline, AudioDocument* d,
     setupToggle (soloButton, juce::Colour (0xffffd84a), T ("Solo: hear only this track (and other solo tracks)", "Solo: hør kun dette spor (og andre solo-spor)"));
     muteButton.setToggleState (doc->muted.load(), juce::dontSendNotification);
     soloButton.setToggleState (doc->soloed.load(), juce::dontSendNotification);
-    muteButton.onClick = [this] { doc->muted = muteButton.getToggleState(); repaint(); view.repaint(); };
-    soloButton.onClick = [this] { doc->soloed = soloButton.getToggleState(); repaint(); view.repaint(); };
+    // solo changes whether the *other* tracks are heard, so let the stack repaint every lane
+    muteButton.onClick = [this] { doc->muted = muteButton.getToggleState(); repaint(); view.repaint(); if (onMixChanged) onMixChanged(); };
+    soloButton.onClick = [this] { doc->soloed = soloButton.getToggleState(); repaint(); view.repaint(); if (onMixChanged) onMixChanged(); };
 }
 
 void TrackLane::setCurrent (bool c)
@@ -225,6 +226,17 @@ int TrackStack::indexOf (const TrackLane* lane) const
     return lanes.indexOf (lane);
 }
 
+bool TrackStack::isSilenced (const AudioDocument* doc) const
+{
+    if (doc == nullptr) return false;
+    bool anySolo = false;
+    for (auto* l : lanes)
+        if (auto* d = l->getDocument())
+            anySolo = anySolo || d->soloed.load();
+    // the engine plays solo tracks when any track is soloed, otherwise all unmuted tracks
+    return anySolo ? ! doc->soloed.load() : doc->muted.load();
+}
+
 void TrackStack::wireView (TrackLane& lane)
 {
     auto* lp = &lane;
@@ -247,12 +259,18 @@ void TrackStack::wireView (TrackLane& lane)
         setDropTarget (-1);
         int target = laneIndexAt (pos);
         int from = indexOf (lp);
-        if (target < 0 || target == from || ! onMoveClipToTrack) return false;
+        if (target < 0 || target == from || ! onMoveClipToTrack || engine.isRecording()) return false;
         // the lane may be rebuilt, so do the move after this mouse event
-        juce::MessageManager::callAsync ([this, from, clipIndex, target] { onMoveClipToTrack (from, clipIndex, target); });
+        juce::Component::SafePointer<TrackStack> safe (this);
+        juce::MessageManager::callAsync ([safe, from, clipIndex, target]
+        {
+            if (safe != nullptr && safe->onMoveClipToTrack) safe->onMoveClipToTrack (from, clipIndex, target);
+        });
         return true;
     };
     v.onContextMenu = [this, lp] (juce::int64 sample) { if (onContextMenu) onContextMenu (indexOf (lp), sample); };
+    v.isSilenced = [this, lp] { return isSilenced (lp->getDocument()); };
+    lane.onMixChanged = [this] { repaintAll(); };
     lane.onSelect = [this, lp] { if (onActivate) onActivate (indexOf (lp)); };
     lane.onClose = [this, lp] { if (onCloseTrack) onCloseTrack (indexOf (lp)); };
     lane.onRename = [this, lp] { if (onRenameTrack) onRenameTrack (indexOf (lp)); };

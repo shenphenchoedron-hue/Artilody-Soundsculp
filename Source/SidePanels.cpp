@@ -1,5 +1,10 @@
 #include "SidePanels.h"
 
+static juce::String channelsText (int n)
+{
+    return n == 1 ? juce::String ("Mono") : (n == 2 ? juce::String ("Stereo") : juce::String (n) + T (" ch", " kan."));
+}
+
 Card::Card (const juce::String& t) : title (t) {}
 
 void Card::paint (juce::Graphics& g)
@@ -55,12 +60,22 @@ void TracksPanel::setTracks (const std::vector<AudioDocument*>& tracks, int curr
         auto* r = rows[i];
         auto* d = tracks[(size_t) i];
         r->name = d->name;
-        r->info = formatTime (d->getLengthSeconds()) + "  " + (d->getNumChannels() == 1 ? "Mono" : "Stereo");
+        r->info = formatTime (d->getLengthSeconds()) + "  " + channelsText (d->getNumChannels());
         r->current = i == currentIndex;
         r->modified = d->modified;
         r->repaint();
     }
     resized();
+}
+
+void TracksPanel::postCallback (std::function<void (int)> TracksPanel::* callback, int index)
+{
+    juce::Component::SafePointer<TracksPanel> safe (this);
+    juce::MessageManager::callAsync ([safe, callback, index]
+    {
+        if (safe != nullptr && (safe.getComponent()->*callback))
+            (safe.getComponent()->*callback) (index);
+    });
 }
 
 void TracksPanel::resized()
@@ -115,10 +130,14 @@ FilePanel::FilePanel() : Card (T ("File", "Fil"))
     moreButton.setBounds (0, 0, 28, 28);
 }
 
+void FilePanel::resized()
+{
+    moreButton.setBounds (getHeaderButtonArea());
+}
+
 void FilePanel::paint (juce::Graphics& g)
 {
     Card::paint (g);
-    moreButton.setBounds (getHeaderButtonArea());
 
     auto r = getContentArea().toFloat();
     if (doc == nullptr)
@@ -141,7 +160,7 @@ void FilePanel::paint (juce::Graphics& g)
         { T ("Format", "Format"), doc->formatName },
         { T ("Sample Rate", "Samplerate"), juce::String (doc->sampleRate / 1000.0, 1) + " kHz" },
         { T ("Bit Depth", "Bitdybde"), juce::String (doc->bitDepth) + " bit" },
-        { T ("Channels", "Kanaler"), doc->getNumChannels() == 1 ? "Mono" : (doc->getNumChannels() == 2 ? "Stereo" : juce::String (doc->getNumChannels())) },
+        { T ("Channels", "Kanaler"), channelsText (doc->getNumChannels()) },
         { T ("Length", "Længde"), formatTime (doc->getLengthSeconds()) },
         { T ("File Size", "Filstørrelse"), sizeText (doc->fileSize) },
     };
@@ -217,7 +236,10 @@ void MarkersPanel::refresh()
     for (auto* r : rows)
     {
         if (! r->nameEditor.hasKeyboardFocus (true))
+        {
+            r->editing = false;
             r->nameEditor.setText (doc->markers[(size_t) r->index].name, false);
+        }
         r->colourButton.colour = doc->markers[(size_t) r->index].colour;
         r->colourButton.repaint();
         r->repaint();
@@ -254,17 +276,11 @@ MarkersPanel::Row::Row (MarkersPanel& o, int i) : owner (o), index (i)
     nameEditor.setIndents (4, 6);
     nameEditor.setSelectAllWhenFocused (false);
     nameEditor.setTooltip (T ("Type the marker text here", "Skriv markørens tekst her"));
-    nameEditor.onTextChange = [this]
-    {
-        if (owner.doc != nullptr && juce::isPositiveAndBelow (index, (int) owner.doc->markers.size()))
-        {
-            owner.doc->markers[(size_t) index].name = nameEditor.getText();
-            owner.doc->modified = true;
-            if (owner.onChanged) owner.onChanged();
-        }
-    };
+    nameEditor.onTextChange = [this] { nameEdited(); };
     nameEditor.onReturnKey = [this] { nameEditor.giveAwayKeyboardFocus(); };
     nameEditor.onEscapeKey = [this] { nameEditor.giveAwayKeyboardFocus(); };
+    // the edit session (one undo step) ends when the field loses focus
+    nameEditor.onFocusLost = [this] { editing = false; };
     addAndMakeVisible (nameEditor);
 
     deleteButton.setColours (juce::Colours::transparentBlack, Theme::textDim);
@@ -272,9 +288,10 @@ MarkersPanel::Row::Row (MarkersPanel& o, int i) : owner (o), index (i)
     deleteButton.onClick = [this]
     {
         auto* d = owner.doc;
-        if (d == nullptr || ! juce::isPositiveAndBelow (index, (int) d->markers.size())) return;
-        d->pushUndo (T ("Delete marker", "Slet markør"));
-        d->markers.erase (d->markers.begin() + index);
+        const int mi = findMarker();
+        if (d == nullptr || mi < 0) return;
+        d->pushUndo (T ("Delete marker", "Slet markør"), true);
+        d->markers.erase (d->markers.begin() + mi);
         d->annotationsChanged();
         juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MarkersPanel> (&owner)]
         {
@@ -284,8 +301,61 @@ MarkersPanel::Row::Row (MarkersPanel& o, int i) : owner (o), index (i)
     addAndMakeVisible (deleteButton);
 
     colourButton.setTooltip (T ("Change the marker colour", "Skift markørens farve"));
-    colourButton.onClick = [this] { owner.chooseColour (index, colourButton.getScreenBounds()); };
+    colourButton.onClick = [this]
+    {
+        const int mi = findMarker();
+        if (mi >= 0) owner.chooseColour (mi, colourButton.getScreenBounds());
+    };
     addAndMakeVisible (colourButton);
+}
+
+int MarkersPanel::Row::findMarker() const
+{
+    auto* d = owner.doc;
+    if (d == nullptr) return -1;
+    const int n = (int) d->markers.size();
+    if (! editing)
+        return juce::isPositiveAndBelow (index, n) ? index : -1;
+
+    auto matches = [d, this] (int i)
+    {
+        auto& m = d->markers[(size_t) i];
+        return m.time == editTime && m.name == editName;
+    };
+    if (juce::isPositiveAndBelow (index, n) && matches (index)) return index;
+    for (int i = 0; i < n; ++i)
+        if (matches (i)) return i;
+    return -1;
+}
+
+void MarkersPanel::Row::nameEdited()
+{
+    auto* d = owner.doc;
+    if (d == nullptr) return;
+
+    int mi = findMarker();
+    if (mi < 0 && editing)
+    {
+        // lost track of the marker (e.g. undo while typing): start a new session on this row
+        editing = false;
+        mi = findMarker();
+    }
+    if (mi < 0) return;
+
+    auto& m = d->markers[(size_t) mi];
+    const auto newName = nameEditor.getText();
+    if (m.name == newName) return;
+
+    if (! editing)
+    {
+        d->pushUndo (T ("Rename marker", "Omdøb markør"), true);
+        editing = true;
+    }
+    m.name = newName;
+    editTime = m.time;
+    editName = newName;
+    d->modified = true;
+    if (owner.onChanged) owner.onChanged();
 }
 
 void MarkersPanel::Row::ColourButton::paintButton (juce::Graphics& g, bool highlighted, bool)
@@ -310,13 +380,29 @@ void MarkersPanel::Row::ColourButton::paintButton (juce::Graphics& g, bool highl
 void MarkersPanel::chooseColour (int index, juce::Rectangle<int> screenArea)
 {
     if (doc == nullptr || ! juce::isPositiveAndBelow (index, (int) doc->markers.size())) return;
-    doc->pushUndo (T ("Marker colour", "Markørfarve"));
     juce::Component::SafePointer<MarkersPanel> safe (this);
     auto* d = doc;
-    showColourPicker (screenArea, doc->markers[(size_t) index].colour, [safe, d, index] (juce::Colour c)
+    // identify the marker by time + name in case the list changes while the picker is open
+    const double markerTime = doc->markers[(size_t) index].time;
+    const juce::String markerName = doc->markers[(size_t) index].name;
+    auto undoPushed = std::make_shared<bool> (false);   // pushed lazily on the first real change
+
+    showColourPicker (screenArea, doc->markers[(size_t) index].colour, [safe, d, index, markerTime, markerName, undoPushed] (juce::Colour c)
     {
-        if (safe == nullptr || safe->doc != d || ! juce::isPositiveAndBelow (index, (int) d->markers.size())) return;
-        d->markers[(size_t) index].colour = c;
+        if (safe == nullptr || safe->doc != d) return;
+        auto matches = [&] (int i) { return d->markers[(size_t) i].time == markerTime && d->markers[(size_t) i].name == markerName; };
+        int mi = -1;
+        if (juce::isPositiveAndBelow (index, (int) d->markers.size()) && matches (index)) mi = index;
+        for (int i = 0; mi < 0 && i < (int) d->markers.size(); ++i)
+            if (matches (i)) mi = i;
+        if (mi < 0 || d->markers[(size_t) mi].colour == c) return;
+
+        if (! *undoPushed)
+        {
+            d->pushUndo (T ("Marker colour", "Markørfarve"), true);
+            *undoPushed = true;
+        }
+        d->markers[(size_t) mi].colour = c;
         d->annotationsChanged();
         safe->refresh();
         if (safe->onChanged) safe->onChanged();

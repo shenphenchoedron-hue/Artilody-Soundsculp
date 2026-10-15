@@ -6,6 +6,29 @@ static juce::String sizeText (double bytes)
     return juce::String (juce::jmax (1.0, bytes / 1024.0), 0) + " KB";
 }
 
+static juce::String channelsText (int n)
+{
+    return n == 1 ? juce::String ("Mono") : (n == 2 ? juce::String ("Stereo") : juce::String (n) + T (" ch", " kan."));
+}
+
+// Removes a trailing audio file extension ("song.wav" -> "song") but keeps other
+// dots ("Mr. Smith" stays "Mr. Smith").
+static juce::String stripAudioExtension (const juce::String& name)
+{
+    const int dot = name.lastIndexOfChar ('.');
+    if (dot <= 0) return name;
+    const auto ext = name.substring (dot + 1).trim().toLowerCase();
+
+    static const char* known[] = { "wav", "wave", "flac", "ogg", "oga", "mp3", "aiff", "aif", "aifc", "m4a", "opus", "aac", "wma", "caf" };
+    bool isAudio = false;
+    for (auto* k : known)
+        if (ext == k) isAudio = true;
+    for (auto& f : FileIO::getExportFormats())
+        if (ext == f.extension.toLowerCase().trimCharactersAtStart (".")) isAudio = true;
+
+    return isAudio ? name.substring (0, dot).trimEnd() : name;
+}
+
 //==============================================================================
 ExportDialog::ScopeCard::ScopeCard (const juce::String& i, const juce::String& t)
     : juce::Button (t), icon (i), title (t)
@@ -53,8 +76,6 @@ void ExportDialog::ScopeCard::paintButton (juce::Graphics& g, bool highlighted, 
 //==============================================================================
 ExportDialog::ExportDialog (const Options& o) : options (o)
 {
-    ffmpegAvailable = FileIO::findFFmpeg() != juce::File();
-
     trackCard.detail = o.hasTrack ? formatTime (o.trackSeconds) + "  " + o.trackName : T ("No track", "Intet spor");
     selectionCard.detail = o.hasSelection ? formatTime (o.selectionSeconds) : T ("Nothing selected", "Intet markeret");
     mixCard.detail = o.multipleTracks ? formatTime (o.mixSeconds) + "  " + T ("one file", "én fil") : T ("Needs 2+ tracks", "Kræver 2+ spor");
@@ -76,20 +97,15 @@ ExportDialog::ExportDialog (const Options& o) : options (o)
         for (auto* id : ids)
             for (int i = 0; i < (int) formats.size(); ++i)
                 if (formats[(size_t) i].id == id)
-                {
-                    auto& f = formats[(size_t) i];
-                    bool ok = ! f.needsFFmpeg || ffmpegAvailable;
-                    formatBox.addItem (f.name + (ok ? juce::String() : T ("  (needs ffmpeg)", "  (kræver ffmpeg)")), i + 1);
-                    formatBox.setItemEnabled (i + 1, ok);
-                }
+                    formatBox.addItem (formats[(size_t) i].name, i + 1);
     };
     addGroup (T ("Uncompressed", "Ukomprimeret"), { "wav16", "wav24", "wav32", "aiff24" });
-    addGroup (T ("Lossless (smaller, same quality)", "Tabsfri (mindre, samme kvalitet)"), { "flac16", "flac24", "alac" });
-    addGroup (T ("Compressed (smallest files)", "Komprimeret (mindste filer)"), { "mp3", "mp3v", "ogg", "m4a", "opus" });
+    addGroup (T ("Lossless (smaller, same quality)", "Tabsfri (mindre, samme kvalitet)"), { "flac16", "flac24" });
+    addGroup (T ("Compressed (smallest files)", "Komprimeret (mindste filer)"), { "ogg" });
 
     int initialId = 2;   // WAV 24-bit
     for (int i = 0; i < (int) formats.size(); ++i)
-        if (formats[(size_t) i].id == o.lastFormatId && (! formats[(size_t) i].needsFFmpeg || ffmpegAvailable))
+        if (formats[(size_t) i].id == o.lastFormatId)
             initialId = i + 1;
     formatBox.setSelectedId (initialId, juce::dontSendNotification);
     formatBox.onChange = [this] { formatChanged(); };
@@ -133,9 +149,11 @@ ExportDialog::ExportDialog (const Options& o) : options (o)
     addAndMakeVisible (cancelButton);
     addAndMakeVisible (exportButton);
 
-    int s = o.initialScope;
-    if (s == 1 && ! o.hasSelection) s = 0;
-    if (s == 0 && ! o.hasTrack && o.multipleTracks) s = 2;
+    // start on the requested scope if it is available, otherwise the first enabled one
+    int s = juce::jlimit (0, 2, o.initialScope);
+    if (! isScopeAvailable (s))
+        for (int i = 0; i < 3; ++i)
+            if (isScopeAvailable (i)) { s = i; break; }
     setScope (s);
     setSize (640, 410);
 }
@@ -150,10 +168,19 @@ const FileIO::ExportFormat* ExportDialog::selectedFormat() const
 juce::String ExportDialog::defaultBaseName() const
 {
     if (scope == 2) return "Mix";
-    auto base = juce::File::createLegalFileName (options.trackName);
-    base = base.containsChar ('.') ? base.upToLastOccurrenceOf (".", false, false) : base;
+    auto base = stripAudioExtension (juce::File::createLegalFileName (options.trackName).trim());
     if (base.isEmpty()) base = "export";
     return scope == 1 ? base + "_selection" : base;
+}
+
+bool ExportDialog::isScopeAvailable (int s) const
+{
+    return s == 0 ? options.hasTrack : (s == 1 ? options.hasSelection : (s == 2 && options.multipleTracks));
+}
+
+void ExportDialog::updateExportEnabled()
+{
+    exportButton.setEnabled (isScopeAvailable (scope) && selectedFormat() != nullptr);
 }
 
 void ExportDialog::setScope (int s)
@@ -164,6 +191,7 @@ void ExportDialog::setScope (int s)
     mixCard.setToggleState (s == 2, juce::dontSendNotification);
     if (auto* f = selectedFormat())
         nameEditor.setText (defaultBaseName() + "." + f->extension, false);
+    updateExportEnabled();
     updateInfo();
 }
 
@@ -171,11 +199,11 @@ void ExportDialog::formatChanged()
 {
     if (auto* f = selectedFormat())
     {
-        auto name = nameEditor.getText().trim();
-        auto base = name.containsChar ('.') ? name.upToLastOccurrenceOf (".", false, false) : name;
+        auto base = stripAudioExtension (nameEditor.getText().trim());
         if (base.isEmpty()) base = defaultBaseName();
         nameEditor.setText (base + "." + f->extension, false);
     }
+    updateExportEnabled();
     updateInfo();
 }
 
@@ -185,16 +213,15 @@ void ExportDialog::updateInfo()
     if (f == nullptr) { infoText.clear(); repaint(); return; }
 
     const double secs = scope == 0 ? options.trackSeconds : (scope == 1 ? options.selectionSeconds : options.mixSeconds);
-    const double pcm = secs * options.sampleRate * options.channels * f->bitDepth / 8.0;
+    const double rate = scope == 0 ? options.trackRate : (scope == 1 ? options.selectionRate : options.mixRate);
+    const int chans = juce::jmax (1, scope == 0 ? options.trackChannels : (scope == 1 ? options.selectionChannels : options.mixChannels));
+    const double pcm = secs * rate * chans * f->bitDepth / 8.0;
     double bytes = pcm;
-    if (f->id.startsWith ("flac") || f->id == "alac") bytes = pcm * 0.6;
-    else if (f->id == "mp3")  bytes = secs * 320000.0 / 8.0;
-    else if (f->id == "mp3v" || f->id == "ogg") bytes = secs * 192000.0 / 8.0;
-    else if (f->id == "m4a")  bytes = secs * 256000.0 / 8.0;
-    else if (f->id == "opus") bytes = secs * 160000.0 / 8.0;
+    if (f->id.startsWith ("flac"))  bytes = pcm * 0.6;
+    else if (f->id == "ogg")        bytes = secs * 192000.0 / 8.0;
 
-    infoText = formatTime (secs) + "   |   " + juce::String (options.sampleRate / 1000.0, 1) + " kHz   |   "
-               + (options.channels == 1 ? "Mono" : "Stereo") + "   |   "
+    infoText = formatTime (secs) + "   |   " + juce::String (rate / 1000.0, 1) + " kHz   |   "
+               + channelsText (chans) + "   |   "
                + T ("approx. ", "ca. ") + sizeText (bytes)
                + T ("   |   Volume lines are included", "   |   Volumenlinjer medregnes");
     repaint();
@@ -203,9 +230,9 @@ void ExportDialog::updateInfo()
 void ExportDialog::doExport()
 {
     auto* f = selectedFormat();
-    if (f == nullptr) return;
+    if (f == nullptr || ! isScopeAvailable (scope)) return;
 
-    auto name = juce::File::createLegalFileName (nameEditor.getText().trim());
+    auto name = stripAudioExtension (juce::File::createLegalFileName (nameEditor.getText().trim()));
     if (name.isEmpty()) name = defaultBaseName();
     auto folder = juce::File (folderEditor.getText().trim());
     if (! juce::File::isAbsolutePath (folderEditor.getText().trim()) || ! (folder.isDirectory() || folder.createDirectory()))
@@ -214,9 +241,8 @@ void ExportDialog::doExport()
                                                 T ("Please choose a valid folder.", "Vælg en gyldig mappe."));
         return;
     }
-    auto file = folder.getChildFile (name);
-    if (! file.hasFileExtension (f->extension))
-        file = file.withFileExtension (f->extension);
+    // append (never replace) the extension, so dots in the name are kept
+    auto file = folder.getChildFile (name + "." + f->extension.trimCharactersAtStart ("."));
 
     const int formatIndex = formatBox.getSelectedId() - 1;
     const int sc = scope;

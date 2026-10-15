@@ -1,14 +1,77 @@
 #include "EQPanel.h"
 
-static constexpr double displayRate = 48000.0;
-
 static juce::String freqText (double f)
 {
     return f >= 1000.0 ? juce::String (f / 1000.0, f >= 10000.0 ? 1 : 2).trimCharactersAtEnd ("0").trimCharactersAtEnd (".") + " kHz"
                        : juce::String ((int) std::round (f)) + " Hz";
 }
 
+// Parses "1000", "1,000 Hz", "1.000", "20.000", "1,5k", "2.5 kHz", "1 234" ...
+// A single separator followed by exactly three digits (and no "k") is treated as a
+// thousands separator; otherwise it is a decimal separator.
+static double parseFrequency (const juce::String& text)
+{
+    const bool kilo = text.containsIgnoreCase ("k");
+    auto s = text.retainCharacters ("0123456789.,");
+    const int lastDot = s.lastIndexOfChar ('.'), lastComma = s.lastIndexOfChar (',');
+
+    if (lastDot >= 0 && lastComma >= 0)
+    {
+        // both present: the last one is the decimal separator
+        const juce::juce_wchar dec = lastDot > lastComma ? '.' : ',';
+        const juce::juce_wchar thou = dec == '.' ? ',' : '.';
+        s = s.removeCharacters (juce::String::charToString (thou)).replaceCharacter (dec, '.');
+    }
+    else if (lastDot >= 0 || lastComma >= 0)
+    {
+        const juce::juce_wchar sep = lastDot >= 0 ? '.' : ',';
+        const int first = s.indexOfChar (sep), last = s.lastIndexOfChar (sep);
+        const int digitsAfter = s.length() - last - 1;
+        const bool thousands = first != last || (! kilo && digitsAfter == 3 && first > 0);
+        s = thousands ? s.removeCharacters (juce::String::charToString (sep))
+                      : s.replaceCharacter (sep, '.');
+    }
+
+    auto v = s.getDoubleValue();
+    return kilo ? v * 1000.0 : v;
+}
+
+static juce::String qText (double v)
+{
+    return "Q " + juce::String (v, v < 10.0 ? 2 : 1);
+}
+
+// Mirrors DSP.cpp's band mapping so the curve can build each band's coefficients
+// once per paint and evaluate them per pixel.
+static juce::dsp::IIR::Coefficients<float>::Ptr makeDisplayCoefficients (const EQBand& band, double sr)
+{
+    using Coeffs = juce::dsp::IIR::Coefficients<float>;
+    auto f = juce::jlimit (10.0f, (float) (sr * 0.49), band.frequency);
+    auto q = juce::jlimit (0.1f, 18.0f, band.q);
+    auto g = juce::Decibels::decibelsToGain (band.gainDb);
+    switch (band.type)
+    {
+        case EQBand::LowShelf:  return Coeffs::makeLowShelf (sr, f, q, g);
+        case EQBand::HighShelf: return Coeffs::makeHighShelf (sr, f, q, g);
+        case EQBand::LowCut:    return Coeffs::makeHighPass (sr, f, q);
+        case EQBand::HighCut:   return Coeffs::makeLowPass (sr, f, q);
+        case EQBand::Notch:     return Coeffs::makeNotch (sr, f, q);
+        case EQBand::Bell:
+        default:                return Coeffs::makePeakFilter (sr, f, q, g);
+    }
+}
+
 //==============================================================================
+float EQCurve::getMaxFrequency() const
+{
+    return juce::jlimit (20.0f, 20000.0f, (float) (sampleRate * 0.49));
+}
+
+float EQCurve::maxQFor (const EQBand& b)
+{
+    return (b.type == EQBand::LowShelf || b.type == EQBand::HighShelf) ? 2.0f : 18.0f;
+}
+
 juce::Rectangle<float> EQCurve::plotArea() const
 {
     return getLocalBounds().toFloat().reduced (1.0f).withTrimmedLeft (28.0f).withTrimmedBottom (18.0f).withTrimmedTop (6.0f).withTrimmedRight (6.0f);
@@ -23,6 +86,7 @@ float EQCurve::xForFreq (float f) const
 float EQCurve::freqForX (float x) const
 {
     auto r = plotArea();
+    if (! (r.getWidth() > 1.0f)) return 20.0f;
     return 20.0f * std::pow (10.0f, 3.0f * juce::jlimit (0.0f, 1.0f, (x - r.getX()) / r.getWidth()));
 }
 
@@ -60,7 +124,17 @@ void EQCurve::paint (juce::Graphics& g)
     g.fillRoundedRectangle (bounds, 8.0f);
 
     auto r = plotArea();
+    if (r.getWidth() <= 1.0f || r.getHeight() <= 1.0f) return;
     g.setFont (Theme::font (10.5f));
+
+    // area above Nyquist (cannot be filtered at this sample rate)
+    const float nyquist = (float) (sampleRate * 0.5);
+    const float curveRight = nyquist < 20000.0f ? juce::jmax (r.getX(), xForFreq (nyquist)) : r.getRight();
+    if (curveRight < r.getRight())
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.fillRect (juce::Rectangle<float> (curveRight, r.getY(), r.getRight() - curveRight, r.getHeight()));
+    }
 
     for (float db : { 12.0f, 6.0f, 0.0f, -6.0f, -12.0f })
     {
@@ -81,14 +155,27 @@ void EQCurve::paint (juce::Graphics& g)
         g.drawText (label, (int) x - 16, (int) r.getBottom() + 3, 32, 13, juce::Justification::centred);
     }
 
+    // coefficients are built once per paint (nullptr = band off)
+    std::array<juce::dsp::IIR::Coefficients<float>::Ptr, 4> coeffs;
+    for (int b = 0; b < 4; ++b)
+        if (settings.bands[(size_t) b].enabled)
+            coeffs[(size_t) b] = makeDisplayCoefficients (settings.bands[(size_t) b], sampleRate);
+
+    auto bandDb = [&] (int b, float f) -> float
+    {
+        auto& c = coeffs[(size_t) b];
+        if (c == nullptr) return 0.0f;
+        return (float) juce::Decibels::gainToDecibels (c->getMagnitudeForFrequency ((double) f, sampleRate), -60.0);
+    };
+
     // individual band curves (subtle)
     for (int b = 0; b < 4; ++b)
     {
-        if (! settings.bands[(size_t) b].enabled) continue;
+        if (coeffs[(size_t) b] == nullptr) continue;
         juce::Path p;
-        for (float x = r.getX(); x <= r.getRight(); x += 2.0f)
+        for (float x = r.getX(); x <= curveRight; x += 2.0f)
         {
-            auto db = juce::jlimit (minDb - 3, maxDb + 3, DSP::bandResponseDb (settings.bands[(size_t) b], displayRate, freqForX (x)));
+            auto db = juce::jlimit (minDb - 3, maxDb + 3, bandDb (b, freqForX (x)));
             if (x == r.getX()) p.startNewSubPath (x, yForDb (db)); else p.lineTo (x, yForDb (db));
         }
         g.setColour (Theme::bandColour (b).withAlpha (0.35f));
@@ -98,16 +185,20 @@ void EQCurve::paint (juce::Graphics& g)
     // combined curve
     juce::Path curve;
     std::vector<juce::Point<float>> pts;
-    for (float x = r.getX(); x <= r.getRight(); x += 1.5f)
+    for (float x = r.getX(); x <= curveRight; x += 1.5f)
     {
-        auto db = juce::jlimit (minDb - 3, maxDb + 3, DSP::eqResponseDb (settings, displayRate, freqForX (x)));
+        const float f = freqForX (x);
+        float total = 0.0f;
+        for (int b = 0; b < 4; ++b) total += bandDb (b, f);
+        auto db = juce::jlimit (minDb - 3, maxDb + 3, total);
         pts.push_back ({ x, yForDb (db) });
     }
     for (size_t i = 0; i < pts.size(); ++i)
         if (i == 0) curve.startNewSubPath (pts[i]); else curve.lineTo (pts[i]);
 
     juce::Path fill (curve);
-    fill.lineTo (r.getRight(), yForDb (0));
+    const float fillRight = pts.empty() ? r.getX() : pts.back().x;
+    fill.lineTo (fillRight, yForDb (0));
     fill.lineTo (r.getX(), yForDb (0));
     fill.closeSubPath();
 
@@ -140,7 +231,7 @@ void EQCurve::mouseDrag (const juce::MouseEvent& e)
 {
     if (dragBand < 0) return;
     auto& b = settings.bands[(size_t) dragBand];
-    b.frequency = juce::jlimit (20.0f, 20000.0f, freqForX (e.position.x));
+    b.frequency = juce::jlimit (20.0f, getMaxFrequency(), freqForX (e.position.x));
     if (b.usesGain())
         b.gainDb = std::round (dbForY (e.position.y) * 10.0f) / 10.0f;
     repaint();
@@ -149,10 +240,11 @@ void EQCurve::mouseDrag (const juce::MouseEvent& e)
 
 void EQCurve::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
 {
+    if (w.deltaY == 0.0f) return;      // horizontal scroll: leave Q alone
     int band = hitBand (e.position);
     if (band < 0) return;
     auto& b = settings.bands[(size_t) band];
-    b.q = juce::jlimit (0.1f, 18.0f, b.q * (w.deltaY > 0 ? 1.1f : 1.0f / 1.1f));
+    b.q = juce::jlimit (0.1f, maxQFor (b), b.q * (w.deltaY > 0 ? 1.1f : 1.0f / 1.1f));
     repaint();
     if (onChange) onChange();
 }
@@ -172,7 +264,9 @@ EQPanel::BandRow::BandRow (EQPanel& o, int i) : owner (o), index (i)
     type.addItemList (EQBand::getTypeNames(), 1);
     type.onChange = [this]
     {
-        owner.settings.bands[(size_t) index].type = type.getSelectedItemIndex();
+        auto& b = owner.settings.bands[(size_t) index];
+        b.type = type.getSelectedItemIndex();
+        b.q = juce::jlimit (0.1f, EQCurve::maxQFor (b), b.q);
         owner.changed();
     };
     addAndMakeVisible (type);
@@ -188,14 +282,9 @@ EQPanel::BandRow::BandRow (EQPanel& o, int i) : owner (o), index (i)
     };
     setup (freq); setup (gain); setup (q);
 
-    freq.setRange (20.0, 20000.0, 1.0);
-    freq.setSkewFactorFromMidPoint (1000.0);
+    updateFrequencyRange();
     freq.textFromValueFunction = [] (double v) { return freqText (v); };
-    freq.valueFromTextFunction = [] (const juce::String& t)
-    {
-        auto v = t.retainCharacters ("0123456789.,").replaceCharacter (',', '.').getDoubleValue();
-        return t.containsIgnoreCase ("k") ? v * 1000.0 : v;
-    };
+    freq.valueFromTextFunction = [] (const juce::String& t) { return parseFrequency (t); };
     freq.onValueChange = [this] { owner.settings.bands[(size_t) index].frequency = (float) freq.getValue(); owner.changed(); };
 
     gain.setRange (-15.0, 15.0, 0.1);
@@ -204,9 +293,9 @@ EQPanel::BandRow::BandRow (EQPanel& o, int i) : owner (o), index (i)
     gain.valueFromTextFunction = [] (const juce::String& t) { return t.retainCharacters ("-0123456789.,").replaceCharacter (',', '.').getDoubleValue(); };
     gain.onValueChange = [this] { owner.settings.bands[(size_t) index].gainDb = (float) gain.getValue(); owner.changed(); };
 
-    q.setRange (0.1, 18.0, 0.01);
+    q.setRange (0.1, EQCurve::maxQFor (owner.settings.bands[(size_t) index]), 0.01);
     q.setSkewFactorFromMidPoint (1.0);
-    q.textFromValueFunction = [] (double v) { return "Q " + juce::String (v, v < 10 ? 1 : 0); };
+    q.textFromValueFunction = [] (double v) { return qText (v); };
     q.valueFromTextFunction = [] (const juce::String& t) { return t.retainCharacters ("0123456789.,").replaceCharacter (',', '.').getDoubleValue(); };
     q.onValueChange = [this] { owner.settings.bands[(size_t) index].q = (float) q.getValue(); owner.changed(); };
 
@@ -220,9 +309,24 @@ EQPanel::BandRow::BandRow (EQPanel& o, int i) : owner (o), index (i)
     refresh();
 }
 
+void EQPanel::BandRow::updateFrequencyRange()
+{
+    const double maxF = owner.curve.getMaxFrequency();
+    if (freq.getMaximum() == maxF) return;
+    freq.setRange (20.0, maxF, 1.0);
+    freq.setSkewFactorFromMidPoint (juce::jmin (1000.0, std::sqrt (20.0 * maxF)));
+}
+
 void EQPanel::BandRow::refresh()
 {
     auto& b = owner.settings.bands[(size_t) index];
+    updateFrequencyRange();
+    const double maxQ = EQCurve::maxQFor (b);
+    if (q.getMaximum() != maxQ)
+    {
+        q.setRange (0.1, maxQ, 0.01);
+        q.setSkewFactorFromMidPoint (1.0);
+    }
     type.setSelectedItemIndex (b.type, juce::dontSendNotification);
     freq.setValue (b.frequency, juce::dontSendNotification);
     gain.setValue (b.gainDb, juce::dontSendNotification);
@@ -313,6 +417,32 @@ void EQPanel::changed()
 void EQPanel::refreshRows()
 {
     for (auto* r : rows) r->refresh();
+}
+
+void EQPanel::setSampleRate (double sr)
+{
+    if (! (sr > 0.0) || sr == sampleRate) return;
+    sampleRate = sr;
+    curve.setSampleRate (sr);
+
+    // keep every band inside the range that can be filtered at this rate
+    const float maxF = curve.getMaxFrequency();
+    bool clamped = false;
+    for (auto& b : settings.bands)
+    {
+        auto f = juce::jlimit (20.0f, maxF, b.frequency);
+        if (f != b.frequency) { b.frequency = f; clamped = true; }
+    }
+
+    refreshRows();
+    curve.repaint();
+    if (clamped && onChange) onChange();
+}
+
+void EQPanel::visibilityChanged()
+{
+    // isEQEnabled() depends on visibility: let the owner update the live EQ
+    if (onChange) onChange();
 }
 
 void EQPanel::paint (juce::Graphics& g)

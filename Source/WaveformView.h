@@ -83,6 +83,7 @@ public:
     std::function<void (juce::Point<int> screenPos)> onClipDragOver;           // clip dragged (for drop highlight)
     std::function<bool (int clipIndex, juce::Point<int> screenPos)> onClipDropped; // true if moved to another track
     std::function<void (juce::int64 sample)> onContextMenu;                    // right-click in the waveform
+    std::function<bool()> isSilenced;                  // muted, or another track is soloed (drawn dimmed)
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -113,6 +114,8 @@ private:
     Drag drag = Drag::none;
     juce::int64 dragAnchor = 0, dragClipOffset = 0;
     bool clipUndoPushed = false;
+    bool annotationUndoPushed = false;                 // marker / envelope drags push undo on the first real change
+    juce::String pendingUndoName;
     int dragIndex = -1;
     bool dragMoved = false;
     juce::Point<int> mouseDownPos;
@@ -126,6 +129,10 @@ private:
     bool isNearEnvelopeLine (juce::Point<float> p) const;
     int findMarkerAt (juce::Point<float> p) const;
     juce::int64 clampSample (double s) const;
+    // While recording, the recorded clip refers directly into the recorder's memory:
+    // clips, markers and the volume line must not be edited with the mouse.
+    bool editsBlocked() const                          { return engine.isRecording(); }
+    void pushPendingAnnotationUndo();
 
     void drawRuler (juce::Graphics&);
     void drawClips (juce::Graphics&);

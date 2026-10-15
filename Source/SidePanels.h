@@ -36,12 +36,14 @@ private:
         {
             close.setColours (juce::Colours::transparentBlack, Theme::textDim);
             close.setTooltip (T ("Close track", "Luk spor"));
-            close.onClick = [this] { if (owner.onClose) owner.onClose (index); };
+            // closing rebuilds the rows (deleting this one), so run it after the click has finished
+            close.onClick = [this] { owner.postCallback (&TracksPanel::onClose, index); };
             addAndMakeVisible (close);
         }
         void paint (juce::Graphics&) override;
         void resized() override { close.setBounds (getWidth() - 24, (getHeight() - 20) / 2, 20, 20); }
-        void mouseUp (const juce::MouseEvent&) override { if (owner.onSelect) owner.onSelect (index); }
+        // selecting can also lead to a rebuild, so it is deferred as well
+        void mouseUp (const juce::MouseEvent&) override { owner.postCallback (&TracksPanel::onSelect, index); }
 
         TracksPanel& owner;
         int index;
@@ -49,6 +51,9 @@ private:
         bool current = false, modified = false;
         IconButton close { "close" };
     };
+
+    // Calls this->*callback (index) asynchronously, if this panel still exists.
+    void postCallback (std::function<void (int)> TracksPanel::* callback, int index);
 
     IconButton addButton { "plus" };
     IconButton openButton { "open", T ("Open", "Åbn") };
@@ -65,6 +70,7 @@ public:
     FilePanel();
     void setDocument (AudioDocument* d)   { doc = d; repaint(); }
     void paint (juce::Graphics&) override;
+    void resized() override;
 
     std::function<void()> onMenu;
 
@@ -96,6 +102,16 @@ private:
         void paint (juce::Graphics&) override;
         void resized() override;
         void mouseUp (const juce::MouseEvent&) override;
+
+        // Index of this row's marker in doc->markers, or -1. While a name edit is in
+        // progress the marker is found by its time + current name, so a re-sort of the
+        // markers (e.g. one dragged in the waveform) never edits the wrong marker.
+        int findMarker() const;
+        void nameEdited();
+
+        bool editing = false;          // an undo step has been pushed for this edit session
+        double editTime = 0.0;
+        juce::String editName;
 
         struct ColourButton : public juce::Button
         {

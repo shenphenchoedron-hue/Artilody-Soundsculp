@@ -1,0 +1,55 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Artilody Soundsculp
+Upstream-Contact: https://github.com/shenphenchoedron-hue/Artilody-Soundsculp/issues
+Source: https://github.com/shenphenchoedron-hue/Artilody-Soundsculp
+Comment:
+ The binary /usr/lib/artilody-soundsculp/artilody-soundsculp is a combined
+ work of the GPL-3.0 application code and the JUCE 8.0.4 framework, which is
+ used under the AGPL-3.0 (combination permitted by section 13 of both
+ licenses). See THIRD_PARTY_NOTICES.md and licenses/ in this directory for
+ details and all license texts.
+
+Files: *
+Copyright: Artilody
+License: GPL-3.0
+
+Files: JUCE/*
+Copyright: Raw Material Software Limited
+License: AGPL-3.0
+Comment:
+ JUCE 8.0.4 (https://github.com/juce-framework/JUCE/tree/8.0.4), compiled into
+ the application binary. JUCE is dual-licensed AGPL-3.0 / commercial; it is
+ used here under the AGPL-3.0. Full license text:
+ /usr/share/doc/artilody-soundsculp/licenses/AGPL-3.0.txt
+ JUCE licence notice: /usr/share/doc/artilody-soundsculp/licenses/JUCE-LICENSE.md
+ .
+ JUCE bundles the following libraries that are compiled into the binary; their
+ license texts are in /usr/share/doc/artilody-soundsculp/licenses/juce/:
+ FLAC (BSD-3-Clause), Ogg Vorbis (BSD-3-Clause), IJG jpeglib (IJG),
+ libpng (libpng), zlib (Zlib), HarfBuzz (Old MIT), SheenBidi (Apache-2.0).
+
+License: GPL-3.0
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License version 3
+ as published by the Free Software Foundation.
+ .
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ .
+ On Debian systems, the complete text of the GNU General Public
+ License version 3 can be found in "/usr/share/common-licenses/GPL-3".
+
+License: AGPL-3.0
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU Affero General Public License version 3
+ as published by the Free Software Foundation.
+ .
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Affero General Public License for more details.
+ .
+ The complete text of the GNU Affero General Public License version 3 is
+ in "/usr/share/doc/artilody-soundsculp/licenses/AGPL-3.0.txt".

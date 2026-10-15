@@ -6,13 +6,13 @@ juce::Colour Theme::markerColour (int index)
     static const juce::uint32 colours[] = { 0xff3b82f6, 0xfff97316, 0xff14c8a0, 0xffa855f7,
                                             0xffef4444, 0xffeab308, 0xffec4899, 0xff22c55e,
                                             0xff06b6d4, 0xff8b5a2b, 0xff94a3b8, 0xffffffff };
-    return juce::Colour (colours[(size_t) (std::abs (index) % numMarkerColours)]);
+    return juce::Colour (colours[(size_t) (((index % numMarkerColours) + numMarkerColours) % numMarkerColours)]);
 }
 
 juce::Colour Theme::bandColour (int index)
 {
     static const juce::uint32 colours[] = { 0xff3b9cff, 0xfff97316, 0xffa855f7, 0xff14c8a0 };
-    return juce::Colour (colours[(size_t) (std::abs (index) % 4)]);
+    return juce::Colour (colours[(size_t) (((index % 4) + 4) % 4)]);
 }
 
 juce::Font Theme::font (float height, bool bold)
@@ -40,7 +40,7 @@ juce::String T (const char* english, const char* danish)
 
 juce::String formatTime (double seconds)
 {
-    if (seconds < 0) seconds = 0;
+    if (! std::isfinite (seconds) || seconds < 0) seconds = 0;     // NaN/inf would make llround undefined
     auto totalMs = (juce::int64) std::llround (seconds * 1000.0);
     auto ms  = (int) (totalMs % 1000);
     auto s   = (int) ((totalMs / 1000) % 60);
@@ -50,7 +50,7 @@ juce::String formatTime (double seconds)
 
 juce::String formatTimeShort (double seconds)
 {
-    if (seconds < 0) seconds = 0;
+    if (! std::isfinite (seconds) || seconds < 0) seconds = 0;
     auto total = (int) std::floor (seconds + 1e-6);
     return juce::String::formatted ("%d:%02d", total / 60, total % 60);
 }

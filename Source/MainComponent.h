@@ -12,6 +12,8 @@
 #include "HeaderBar.h"
 #include "FileIO.h"
 
+class ExportJob;   // background export (defined in MainComponent.cpp)
+
 //==============================================================================
 class MainComponent : public juce::Component,
                       public juce::FileDragAndDropTarget,
@@ -68,9 +70,24 @@ private:
     juce::uint32 messageTime = 0;
     juce::Rectangle<int> waveCard, leftColumn, rightColumn;
 
+    bool wasPlaying = false;                                   // for the repaint after playback stops
+    juce::String lastTrackListState;                           // skips needless track list rebuilds
+    juce::Component::SafePointer<juce::Component> audioSettingsWindow;   // deleted before the engine
+    std::unique_ptr<ExportJob> exportJob;                      // running background export (if any)
+
+    // Coalesces the (expensive) copy of the noise analysis material.
+    struct DebounceTimer : public juce::Timer
+    {
+        std::function<void()> callback;
+        void timerCallback() override   { stopTimer(); if (callback) callback(); }
+    };
+    DebounceTimer noiseMaterialTimer;
+    double panelSampleRate = 0.0;
+
     // ----- documents
     AudioDocument* current() const;
     std::vector<AudioDocument*> allDocuments() const;
+    std::vector<AudioDocument*> audibleTracks() const;        // non-empty tracks heard in the mix (mute / solo)
     AudioDocument* addDocument (std::unique_ptr<AudioDocument> d);
     void selectDocument (int index);
     void closeDocument (int index);
@@ -78,6 +95,11 @@ private:
     void refreshTrackList();
     void refreshAll();
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
+    bool ownsDocument (const AudioDocument* d) const;
+    void finishRecording (AudioDocument* recorded);           // bookkeeping after engine.stopRecording()
+    void stopRecordingAndFinish();
+    void selectionChanged();                                    // selection / cursor of the current track changed
+    void updatePanelSampleRates();
 
     // ----- menus / dialogs
     void showTracksMenu();
@@ -117,7 +139,9 @@ private:
     void previewNoise();
     void applyNoise();
     std::vector<float> getNoiseProfile();
-    void updateNoiseMaterial();
+    void updateNoiseMaterial();                                 // debounced
+    void updateNoiseMaterialNow();
+    void getNoiseMaterialRange (juce::int64& start, juce::int64& end, double maxSeconds) const;
     void insertBufferAtCursor (juce::AudioBuffer<float> data, double rate, const juce::String& undoName, const juce::String& clipName = {});
     void applyToRange (const juce::String& undoName, juce::int64 s, juce::int64 e,
                        const std::function<void (juce::AudioBuffer<float>&, juce::int64)>& fn);
@@ -126,7 +150,8 @@ private:
     void doJoin();
     void moveClipToTrack (int fromIndex, int clipIndex, int toIndex);
     void showWaveContextMenu (int laneIndex, juce::int64 sample);
-    juce::AudioBuffer<float> mixTracks (const std::vector<AudioDocument*>& tracks, double& rateOut, bool& normalised);
+    juce::AudioBuffer<float> mixTracks (const std::vector<AudioDocument*>& tracks, double& rateOut, bool& normalised,
+                                        juce::String* error = nullptr);
     void addMarkerAtCursor();
     void undo();
     void redo();
