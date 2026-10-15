@@ -7,4 +7,5 @@ dist/
 *.user
 .DS_Store
 ArtilodySoundsculplydeditor.png
-ikonlogo.png
+/ikonlogo.png
+/wrongikon.png

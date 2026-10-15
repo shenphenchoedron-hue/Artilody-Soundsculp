@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(ArtilodySoundsculp VERSION 1.1.0 LANGUAGES C CXX)
+project(ArtilodySoundsculp VERSION 1.1.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,7 +22,13 @@ else()
         GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
         GIT_TAG        8.0.4
         GIT_SHALLOW    TRUE)
-    FetchContent_MakeAvailable(JUCE)
+    # Populate manually and add with EXCLUDE_FROM_ALL so JUCE's own install rules
+    # (headers, CMake files) do not end up in our installers.
+    FetchContent_GetProperties(JUCE)
+    if(NOT juce_POPULATED)
+        FetchContent_Populate(JUCE)
+        add_subdirectory(${juce_SOURCE_DIR} ${juce_BINARY_DIR} EXCLUDE_FROM_ALL)
+    endif()
 endif()
 
 juce_add_gui_app(ArtilodySoundsculp
@@ -95,15 +101,22 @@ if(UNIX AND NOT APPLE)
             RENAME artilody-soundsculp)
     install(FILES packaging/linux/artilody-soundsculp.desktop
             DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
-    install(FILES Resources/icon_256.png
-            DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps
-            RENAME artilody-soundsculp.png)
+    # app icon in several sizes so every menu/launcher finds a fitting one
+    foreach(_size 48 64 128 256)
+        install(FILES Resources/icon_${_size}.png
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${_size}x${_size}/apps
+                RENAME com.artilody.soundsculp.png)
+    endforeach()
+    install(FILES Resources/icon.png
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/512x512/apps
+            RENAME com.artilody.soundsculp.png)
     install(PROGRAMS packaging/linux/artilody-soundsculp
             DESTINATION ${CMAKE_INSTALL_BINDIR})
     install(DIRECTORY docs/pdf/ DESTINATION ${CMAKE_INSTALL_DOCDIR} OPTIONAL)
 
     set(CPACK_GENERATOR "DEB")
     set(CPACK_STRIP_FILES ON)
+    set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/postinst;${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/postrm")
     set(CPACK_PACKAGE_NAME "artilody-soundsculp")
     set(CPACK_PACKAGE_VENDOR "Artilody")
     set(CPACK_PACKAGE_CONTACT "Artilody <shenphenchoedron-hue@users.noreply.github.com>")

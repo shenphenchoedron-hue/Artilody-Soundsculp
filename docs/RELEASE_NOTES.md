@@ -1,18 +1,22 @@
-## Artilody Soundsculp 1.1.0
+## Artilody Soundsculp 1.1.1
 
 ### Download
 | System | File |
 |---|---|
-| Windows 10/11 (64-bit) | `ArtilodySoundsculp-1.1.0-Windows-Setup.exe` (installer) or `…-Windows-Portable.zip` |
-| macOS 11+ (Intel + Apple Silicon) | `ArtilodySoundsculp-1.1.0-macOS-Universal.dmg` |
-| Debian 12+ | `artilody-soundsculp_1.1.0_debian-12_amd64.deb` |
-| Ubuntu 22.04 / 24.04 | `artilody-soundsculp_1.1.0_ubuntu-22.04-24.04_amd64.deb` |
+| Windows 10/11 (64-bit) | `ArtilodySoundsculp-1.1.1-Windows-Setup.exe` (installer) or `…-Windows-Portable.zip` |
+| macOS 11+ (Intel + Apple Silicon) | `ArtilodySoundsculp-1.1.1-macOS-Universal.dmg` |
+| Debian 12+ | `artilody-soundsculp_1.1.1_debian-12_amd64.deb` |
+| Ubuntu 22.04 / 24.04 | `artilody-soundsculp_1.1.1_ubuntu-22.04-24.04_amd64.deb` |
 
 User manuals: `Artilody-Soundsculp-Manual-EN.pdf` (English) and `Artilody-Soundsculp-Manual-DA.pdf` (Danish).
 
 Linux: `sudo apt install ./artilody-soundsculp_*.deb` · macOS: first launch with right-click → Open (the app is not notarised).
 
-### New in 1.1.0
+### Fixed in 1.1.1
+- Linux packages no longer install the JUCE development files (package size 30 MB → about 5 MB)
+- The app icon (from the new Artilody Soundsculp logo) now shows correctly in the Linux application menu; icons are installed in 48–512 px and the menu/icon caches are refreshed on install
+
+### New in 1.1 (since 1.0)
 - All tracks are shown below each other on a shared timeline and **play together**
 - **Clips** like in Audacity: cut/delete leave a gap, Split (Ctrl+I), Join (Ctrl+J), drag clips by their name bar – also onto other tracks, Delete and close gap (Shift+Delete), right-click menu
 - **Mute / Solo** per track
