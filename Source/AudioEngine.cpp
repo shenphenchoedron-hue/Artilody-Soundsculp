@@ -235,8 +235,8 @@ void AudioEngine::drainRecordFifo()
         return;
 
     const auto oldLen = recordedSamples;
-    const auto room = juce::jmax<juce::int64> (0, maxRecordSamples - oldLen);
-    const int toKeep = (int) juce::jmin<juce::int64> (ready, room);
+    const auto room = std::max<juce::int64> (0, maxRecordSamples - oldLen);
+    const int toKeep = (int) std::min<juce::int64> (ready, room);
     if (toKeep < ready)
         recordOverflow = true;   // length limit reached - the rest is dropped
     const auto newLen = oldLen + toKeep;

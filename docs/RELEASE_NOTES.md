@@ -14,10 +14,11 @@ Linux: `sudo apt install ./artilody-soundsculp_*.deb`
 
 macOS (the app is not notarised): on macOS 15 Sequoia and later, open the app once, then go to **System Settings → Privacy & Security** and click **Open Anyway** next to the message about Artilody Soundsculp (on macOS 11–14 you can instead right-click the app → Open). Alternatively run `xattr -dr com.apple.quarantine "/Applications/Artilody Soundsculp.app"` in Terminal. macOS 11 Big Sur and later are fully supported.
 
-Licenses: Artilody Soundsculp is GPL-3.0 and uses JUCE under the AGPLv3. License texts and third-party notices are included in every package (see `THIRD_PARTY_NOTICES.md`).
+Licenses: Artilody Soundsculp is GPL-3.0, uses JUCE under the AGPLv3 and the LAME MP3 encoder under the LGPL. License texts and third-party notices are included in every package (see `THIRD_PARTY_NOTICES.md`).
 
 ### Changes in 1.1.3
-- **Export formats** are now WAV (16/24-bit, 32-bit float), AIFF (24-bit), FLAC (16/24-bit) and Ogg Vorbis (192 kbps). MP3, M4A (AAC / Apple Lossless) and Opus export were removed together with the previously bundled ffmpeg, so the packages contain no external programs and **macOS 11+ is fully supported**
+- **MP3 export with the built-in LAME encoder** (320 or 192 kbps, with LAME tag for exact length). The bundled ffmpeg program was removed, so the packages contain no external programs and **macOS 11+ is fully supported** (Universal: Intel + Apple Silicon)
+- **Export formats**: WAV (16/24-bit, 32-bit float), AIFF (24-bit), FLAC (16/24-bit), MP3 (320/192 kbps) and Ogg Vorbis (192 kbps). M4A (AAC / Apple Lossless) and Opus export were removed
 - **Opening files**: WAV, AIFF, FLAC, Ogg Vorbis and MP3 (JUCE's built-in decoder) on all systems; M4A/AAC/CAF additionally on macOS. Opus files can no longer be opened, and M4A files only on macOS
 - **Export runs in the background** with a progress window, so the program no longer freezes while exporting
 - Windows: no Visual C++ Redistributable is needed any more

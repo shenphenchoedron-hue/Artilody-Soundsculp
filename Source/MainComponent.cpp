@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "DSP.h"
 #include "ExportDialog.h"
+#include <lame.h>
 
 //==============================================================================
 // Small dialog helpers
@@ -1226,6 +1227,8 @@ void MainComponent::showSettingsMenu()
                 + T ("Simple multi-track audio editor.", "Simpel lydredigering med flere spor.") + "\n"
                 + "https://github.com/shenphenchoedron-hue/Artilody-Soundsculp\n\n"
                 + "License: GPL-3.0. Built with JUCE 8, used under the AGPLv3.\n"
+                + T ("MP3 export: LAME ", "MP3-eksport: LAME ") + juce::String (get_lame_version())
+                + " (LGPL, https://lame.sourceforge.io).\n"
                 + T ("License texts and third-party notices: THIRD_PARTY_NOTICES and the licenses folder in the installation.",
                      "Licenstekster og tredjepartsnoter: THIRD_PARTY_NOTICES og mappen licenses i installationen."));
         }

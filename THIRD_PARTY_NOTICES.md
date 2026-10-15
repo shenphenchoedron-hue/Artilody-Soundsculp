@@ -41,7 +41,20 @@ application (license texts in `licenses/juce/`):
 Other JUCE dependencies (VST3/AAX/LV2/AudioUnit SDKs, Oboe, GLEW, Box2D, CHOC,
 QuickJS) belong to modules or features that this application does not compile.
 
+## LAME 3.100 – LGPL-2.0-or-later
+
+MP3 export uses the **LAME** MP3 encoder (<https://lame.sourceforge.io>, formerly
+www.mp3dev.org), version 3.100, licensed under the **GNU Library General Public
+License version 2 or later** (`licenses/LAME-LGPL-2.0.txt`). The unmodified LAME
+encoder sources are included in the application's source repository in
+[`third_party/lame`](third_party/lame) and are compiled into the application;
+the complete source code of the application, including LAME and the build
+scripts needed to rebuild and relink it, is available at
+<https://github.com/shenphenchoedron-hue/Artilody-Soundsculp>.
+
+## Decoding
+
 MP3 files are decoded with JUCE's own built-in MP3 decoder
 (`JUCE_USE_MP3AUDIOFORMAT`), which is part of JUCE and covered by the AGPLv3 notice
 above. On macOS, M4A/AAC/CAF files are opened with the operating system's Core
-Audio framework. No other codec libraries or external programs are included.
+Audio framework. No external programs are included.

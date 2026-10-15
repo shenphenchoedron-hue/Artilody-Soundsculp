@@ -6,7 +6,8 @@ Comment:
  The binary /usr/lib/artilody-soundsculp/artilody-soundsculp is a combined
  work of the GPL-3.0 application code and the JUCE 8.0.4 framework, which is
  used under the AGPL-3.0 (combination permitted by section 13 of both
- licenses). See THIRD_PARTY_NOTICES.md and licenses/ in this directory for
+ licenses), and the LAME 3.100 MP3 encoder (LGPL-2.0+). See
+ THIRD_PARTY_NOTICES.md and licenses/ in this directory for
  details and all license texts.
 
 Files: *
@@ -28,6 +29,15 @@ Comment:
  FLAC (BSD-3-Clause), Ogg Vorbis (BSD-3-Clause), IJG jpeglib (IJG),
  libpng (libpng), zlib (Zlib), HarfBuzz (Old MIT), SheenBidi (Apache-2.0).
 
+Files: third_party/lame/*
+Copyright: 1999-2017 The LAME Project (Mike Cheng, Mark Taylor, Robert Hegemann, Alexander Leidinger and others)
+License: LGPL-2.0+
+Comment:
+ LAME 3.100 MP3 encoder (https://lame.sourceforge.io), compiled unmodified into
+ the application binary for MP3 export. Source: third_party/lame in
+ https://github.com/shenphenchoedron-hue/Artilody-Soundsculp
+ Full license text: /usr/share/doc/artilody-soundsculp/licenses/LAME-LGPL-2.0.txt
+
 License: GPL-3.0
  This program is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 3
@@ -40,6 +50,15 @@ License: GPL-3.0
  .
  On Debian systems, the complete text of the GNU General Public
  License version 3 can be found in "/usr/share/common-licenses/GPL-3".
+
+License: LGPL-2.0+
+ This library is free software; you can redistribute it and/or modify
+ it under the terms of the GNU Library General Public License as
+ published by the Free Software Foundation; either version 2 of the
+ License, or (at your option) any later version.
+ .
+ On Debian systems, the complete text of the GNU Library General Public
+ License version 2 can be found in "/usr/share/common-licenses/LGPL-2".
 
 License: AGPL-3.0
  This program is free software: you can redistribute it and/or modify

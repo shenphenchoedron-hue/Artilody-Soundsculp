@@ -1,6 +1,7 @@
 #include "FileIO.h"
 #include "AudioDocument.h"
 #include "Theme.h"
+#include <lame.h>
 
 juce::AudioFormatManager& FileIO::getFormatManager()
 {
@@ -105,6 +106,8 @@ const std::vector<FileIO::ExportFormat>& FileIO::getExportFormats()
         { "flac16", "FLAC 16-bit (lossless)",    "flac", 16 },
         { "flac24", "FLAC 24-bit (lossless)",    "flac", 24 },
         { "ogg",    "OGG Vorbis (192 kbps)",     "ogg",  16 },
+        { "mp3",    "MP3 (320 kbps)",            "mp3",  16 },
+        { "mp3v",   "MP3 (192 kbps)",            "mp3",  16 },
     };
     return formats;
 }
@@ -161,6 +164,128 @@ static bool writeWithJuce (juce::AudioFormat& fmt, const juce::AudioBuffer<float
     return true;
 }
 
+//==============================================================================
+// MP3 export with the LAME encoder compiled into the app (third_party/lame).
+//==============================================================================
+namespace
+{
+    struct LameHandle
+    {
+        lame_global_flags* gf = lame_init();
+        ~LameHandle() { if (gf != nullptr) lame_close (gf); }
+    };
+
+    // MP3 (MPEG-1 Layer III) supports 32, 44.1 and 48 kHz at high bit rates; LAME resamples to it.
+    int mp3OutputRate (double rate)
+    {
+        const auto r = (int) std::llround (rate);
+        if (r == 32000 || r == 44100 || r == 48000) return r;
+        if (r > 0 && r % 11025 == 0) return 44100;     // 11.025 / 22.05 / 88.2 / 176.4 kHz family
+        if (r > 0 && r < 32000) return 32000;
+        return 48000;
+    }
+}
+
+static bool writeMp3ToFile (const juce::AudioBuffer<float>& buffer, double sampleRate, int kbps,
+                            const juce::File& file, juce::String& error)
+{
+    const int numSamples = buffer.getNumSamples();
+    const int inChannels = buffer.getNumChannels();
+    const int outChannels = inChannels == 1 ? 1 : 2;   // MP3 is mono or stereo
+
+    // Left/right input (more than 2 channels are folded down to stereo)
+    juce::AudioBuffer<float> lr (outChannels, numSamples);
+    if (inChannels <= 2)
+    {
+        for (int c = 0; c < outChannels; ++c)
+            lr.copyFrom (c, 0, buffer, juce::jmin (c, inChannels - 1), 0, numSamples);
+    }
+    else
+    {
+        lr.clear();
+        const float g = 2.0f / (float) inChannels;
+        for (int c = 0; c < inChannels; ++c)
+            lr.addFrom (c % 2, 0, buffer, c, 0, numSamples, g);
+        for (int c = 0; c < 2; ++c)
+            juce::FloatVectorOperations::clip (lr.getWritePointer (c), lr.getReadPointer (c), -1.0f, 1.0f, numSamples);
+    }
+
+    LameHandle lame;
+    if (lame.gf == nullptr)
+    {
+        error = T ("Could not start the MP3 encoder.", "Kunne ikke starte MP3-koderen.");
+        return false;
+    }
+    lame_set_in_samplerate (lame.gf, (int) std::llround (sampleRate));
+    lame_set_out_samplerate (lame.gf, mp3OutputRate (sampleRate));
+    lame_set_num_channels (lame.gf, outChannels);
+    lame_set_mode (lame.gf, outChannels == 1 ? MONO : JOINT_STEREO);
+    lame_set_VBR (lame.gf, vbr_off);
+    lame_set_brate (lame.gf, kbps);
+    lame_set_quality (lame.gf, 2);                  // high quality
+    lame_set_write_id3tag_automatic (lame.gf, 0);
+    lame_set_bWriteVbrTag (lame.gf, 1);             // LAME/Xing tag: exact length and gapless playback
+    if (lame_init_params (lame.gf) < 0)
+    {
+        error = T ("The MP3 encoder does not support these settings.", "MP3-koderen understøtter ikke disse indstillinger.");
+        return false;
+    }
+
+    file.deleteFile();
+    juce::FileOutputStream out (file);
+    if (out.failedToOpen())
+    {
+        error = T ("Cannot write to ", "Kan ikke skrive til ") + file.getFullPathName();
+        return false;
+    }
+
+    constexpr int chunk = 8192;
+    std::vector<unsigned char> mp3 ((size_t) (chunk * 5 / 4 + 7200));
+    const float* left = lr.getReadPointer (0);
+    const float* right = lr.getReadPointer (outChannels - 1);
+
+    for (int pos = 0; pos < numSamples; pos += chunk)
+    {
+        if (juce::Thread::currentThreadShouldExit())
+        {
+            error = T ("Cancelled.", "Annulleret.");
+            return false;
+        }
+        const int n = juce::jmin (chunk, numSamples - pos);
+        const int bytes = lame_encode_buffer_ieee_float (lame.gf, left + pos, right + pos, n, mp3.data(), (int) mp3.size());
+        if (bytes < 0 || ! out.write (mp3.data(), (size_t) bytes))
+        {
+            error = T ("Error while encoding the MP3 file.", "Fejl under kodning af MP3-filen.");
+            return false;
+        }
+    }
+
+    const int last = lame_encode_flush (lame.gf, mp3.data(), (int) mp3.size());
+    if (last < 0 || ! out.write (mp3.data(), (size_t) last))
+    {
+        error = T ("Error while encoding the MP3 file.", "Fejl under kodning af MP3-filen.");
+        return false;
+    }
+
+    // Write the LAME/Xing tag into the first frame (reserved by the encoder)
+    std::vector<unsigned char> tag (2880);
+    const auto tagSize = lame_get_lametag_frame (lame.gf, tag.data(), tag.size());
+    if (tagSize > 0 && tagSize <= tag.size())
+    {
+        out.flush();
+        if (out.setPosition (0))
+            out.write (tag.data(), tagSize);
+    }
+
+    out.flush();
+    if (out.getStatus().failed() || ! file.existsAsFile() || file.getSize() <= 0)
+    {
+        error = T ("Error while writing the file.", "Fejl under skrivning af filen.");
+        return false;
+    }
+    return true;
+}
+
 bool FileIO::writeBuffer (const juce::AudioBuffer<float>& buffer, double sampleRate, const juce::File& dest,
                           const ExportFormat& f, juce::String& error)
 {
@@ -202,6 +327,19 @@ bool FileIO::writeBuffer (const juce::AudioBuffer<float>& buffer, double sampleR
         auto opts = ogg.getQualityOptions();
         auto q = juce::jmax (0, opts.indexOf ("192 kbps"));
         return writeWithJuce (ogg, safe, sampleRate, dest, 16, q, error);
+    }
+
+    if (f.id == "mp3" || f.id == "mp3v")
+    {
+        juce::TemporaryFile temp (dest);
+        if (! writeMp3ToFile (safe, sampleRate, f.id == "mp3" ? 320 : 192, temp.getFile(), error))
+            return false;
+        if (! temp.overwriteTargetFileWithTemporary())
+        {
+            error = T ("Cannot write to ", "Kan ikke skrive til ") + dest.getFullPathName();
+            return false;
+        }
+        return true;
     }
 
     error = T ("Unknown export format.", "Ukendt eksportformat.");

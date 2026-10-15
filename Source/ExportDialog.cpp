@@ -101,7 +101,7 @@ ExportDialog::ExportDialog (const Options& o) : options (o)
     };
     addGroup (T ("Uncompressed", "Ukomprimeret"), { "wav16", "wav24", "wav32", "aiff24" });
     addGroup (T ("Lossless (smaller, same quality)", "Tabsfri (mindre, samme kvalitet)"), { "flac16", "flac24" });
-    addGroup (T ("Compressed (smallest files)", "Komprimeret (mindste filer)"), { "ogg" });
+    addGroup (T ("Compressed (smallest files)", "Komprimeret (mindste filer)"), { "mp3", "mp3v", "ogg" });
 
     int initialId = 2;   // WAV 24-bit
     for (int i = 0; i < (int) formats.size(); ++i)
@@ -218,7 +218,8 @@ void ExportDialog::updateInfo()
     const double pcm = secs * rate * chans * f->bitDepth / 8.0;
     double bytes = pcm;
     if (f->id.startsWith ("flac"))  bytes = pcm * 0.6;
-    else if (f->id == "ogg")        bytes = secs * 192000.0 / 8.0;
+    else if (f->id == "mp3")        bytes = secs * 320000.0 / 8.0;
+    else if (f->id == "mp3v" || f->id == "ogg") bytes = secs * 192000.0 / 8.0;
 
     infoText = formatTime (secs) + "   |   " + juce::String (rate / 1000.0, 1) + " kHz   |   "
                + channelsText (chans) + "   |   "

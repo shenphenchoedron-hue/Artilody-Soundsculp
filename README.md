@@ -21,9 +21,11 @@ A simple multi-track audio editor for Windows, macOS and Linux, built with C++ a
 | | Formats |
 |---|---|
 | **Open** | WAV, AIFF, FLAC, Ogg Vorbis and MP3 on all systems; additionally M4A / AAC / CAF on macOS |
-| **Export** | WAV (16-bit, 24-bit, 32-bit float), AIFF (24-bit), FLAC (16/24-bit, lossless), Ogg Vorbis (192 kbps) |
+| **Export** | WAV (16-bit, 24-bit, 32-bit float), AIFF (24-bit), FLAC (16/24-bit, lossless), MP3 (320 / 192 kbps), Ogg Vorbis (192 kbps) |
 
-Everything is handled by JUCE itself (on macOS M4A/AAC/CAF via Core Audio) – no external programs are needed or bundled.
+MP3 export uses the [LAME](https://lame.sourceforge.io) encoder, which is compiled into the app from the sources in
+[`third_party/lame`](third_party/lame); everything else is handled by JUCE (on macOS M4A/AAC/CAF via Core Audio).
+No external programs are needed or bundled.
 Opus files cannot be opened, and M4A files only on macOS.
 
 ## Download
@@ -79,5 +81,6 @@ Artilody Soundsculp is licensed under the **GPL-3.0** – see [LICENSE](LICENSE)
   combined work as a whole.
 - JUCE includes third-party libraries compiled into the app (FLAC, Ogg Vorbis, IJG jpeglib, libpng, zlib,
   HarfBuzz, SheenBidi) under permissive licenses. MP3 files are decoded with JUCE's own MP3 decoder.
+- MP3 export uses **LAME 3.100** (LGPL-2.0-or-later), included unmodified in [third_party/lame](third_party/lame).
 
 Details and all license texts: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [packaging/licenses](packaging/licenses).

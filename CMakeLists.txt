@@ -55,6 +55,30 @@ juce_add_gui_app(ArtilodySoundsculp
 
 juce_generate_juce_header(ArtilodySoundsculp)
 
+# ---------------------------------------------------------------------------
+# LAME 3.100 MP3 encoder (LGPL-2.0-or-later), compiled into the app from the
+# unmodified sources in third_party/lame. Only the encoder is built; it is
+# portable C, so it follows CMAKE_OSX_ARCHITECTURES (Universal) and the
+# macOS deployment target like the rest of the app.
+# ---------------------------------------------------------------------------
+file(GLOB LAME_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lame/libmp3lame/*.c")
+add_library(mp3lame STATIC ${LAME_SOURCES})
+target_include_directories(mp3lame
+    PRIVATE  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lame"
+             "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lame/libmp3lame"
+    PUBLIC   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/lame/include")
+target_compile_definitions(mp3lame PRIVATE HAVE_CONFIG_H)
+set_target_properties(mp3lame PROPERTIES C_STANDARD 99 POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_definitions(mp3lame PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(mp3lame PRIVATE /w)
+else()
+    target_compile_options(mp3lame PRIVATE -w)
+    if(NOT APPLE)
+        target_link_libraries(mp3lame PRIVATE m)
+    endif()
+endif()
+
 juce_add_binary_data(SoundsculpData SOURCES
     Resources/logo_mark.png
     Resources/icon_256.png
@@ -91,6 +115,7 @@ target_compile_definitions(ArtilodySoundsculp PRIVATE
 target_link_libraries(ArtilodySoundsculp
     PRIVATE
         SoundsculpData
+        mp3lame
         juce::juce_gui_extra
         juce::juce_audio_utils
         juce::juce_audio_devices
@@ -137,7 +162,7 @@ if(UNIX AND NOT APPLE)
     set(CPACK_PACKAGE_VENDOR "Artilody")
     set(CPACK_PACKAGE_CONTACT "Artilody <shenphenchoedron-hue@users.noreply.github.com>")
     set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Artilody Soundsculp - simple audio editor")
-    set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "Simple multi-file audio editor with trim, cut/paste, fades,\n normalize, silence trim, loop, reverse, pitch shift, parametric EQ,\n noise remover, volume envelopes, text markers and export to WAV, AIFF,\n FLAC and Ogg Vorbis.")
+    set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "Simple multi-file audio editor with trim, cut/paste, fades,\n normalize, silence trim, loop, reverse, pitch shift, parametric EQ,\n noise remover, volume envelopes, text markers and export to WAV, AIFF,\n FLAC, Ogg Vorbis and MP3 (LAME).")
     set(CPACK_DEBIAN_PACKAGE_SECTION "sound")
     set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
     # Linked libraries are detected by dpkg-shlibdeps (needs dpkg-dev); the X11
