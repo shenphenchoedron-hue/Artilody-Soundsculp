@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(ArtilodySoundsculp VERSION 1.1.1 LANGUAGES C CXX)
+project(ArtilodySoundsculp VERSION 1.1.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -114,6 +114,13 @@ if(UNIX AND NOT APPLE)
             DESTINATION ${CMAKE_INSTALL_BINDIR})
     install(DIRECTORY docs/pdf/ DESTINATION ${CMAKE_INSTALL_DOCDIR} OPTIONAL)
 
+    # Bundle a static ffmpeg (MP3/M4A/Opus export, extra import formats) so the
+    # package does not depend on any third-party download.
+    set(BUNDLE_FFMPEG "" CACHE FILEPATH "Static ffmpeg executable to include in the package")
+    if(BUNDLE_FFMPEG AND EXISTS "${BUNDLE_FFMPEG}")
+        install(PROGRAMS "${BUNDLE_FFMPEG}" DESTINATION lib/artilody-soundsculp RENAME ffmpeg)
+    endif()
+
     set(CPACK_GENERATOR "DEB")
     set(CPACK_STRIP_FILES ON)
     set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/postinst;${CMAKE_CURRENT_SOURCE_DIR}/packaging/linux/postrm")
@@ -124,8 +131,7 @@ if(UNIX AND NOT APPLE)
     set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "Simple multi-file audio editor with trim, cut/paste, fades,\n normalize, silence trim, loop, reverse, pitch shift, parametric EQ,\n noise remover, volume envelopes, text markers and export to many formats.")
     set(CPACK_DEBIAN_PACKAGE_SECTION "sound")
     set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libasound2 | libasound2t64, libfreetype6, libfontconfig1, libx11-6, libxext6, libxrandr2, libxinerama1, libxcursor1, libgl1")
-    set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "ffmpeg")
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libasound2 | libasound2t64, libfreetype6, libfontconfig1, libx11-6, libxext6, libxrandr2, libxinerama1, libxcursor1")
     set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/shenphenchoedron-hue/Artilody-Soundsculp")
     set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
     if(NOT CPACK_DEBIAN_FILE_NAME)

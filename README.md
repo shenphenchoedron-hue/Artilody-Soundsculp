@@ -38,7 +38,7 @@ cmake --build build -j
 Self tests: run the program with `--selftest` (DSP + file formats) or `--uitest` (editing workflow).  
 Manuals: `tools/build_manuals.sh` renders `docs/manual/*.html` to `docs/pdf/*.pdf`.
 
-MP3/M4A/Opus export uses `ffmpeg` (bundled with the Windows and macOS installers; on Linux install the `ffmpeg` package).
+MP3/M4A/Opus export uses `ffmpeg`, which is bundled with all installers (Windows, macOS, Debian, Ubuntu) – the packages are self-contained.
 
 ## License
 GPL-3.0 – see [LICENSE](LICENSE).

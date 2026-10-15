@@ -11,7 +11,7 @@
   <img class="logo" src="../../Resources/icon_256.png" alt="Logo">
   <h1>Artilody Soundsculp</h1>
   <div class="sub">Brugermanual – dansk</div>
-  <div class="ver">Version 1.1.1</div>
+  <div class="ver">Version 1.1.2</div>
 </div>
 
 <h2>Indhold</h2>
@@ -52,23 +52,23 @@ Denne manual bruger de engelske navne på knapperne, med den danske betydning i 
 <p>Hent installationsfilen fra siden <b>Releases</b> på <code>github.com/shenphenchoedron-hue/Artilody-Soundsculp</code>.</p>
 <h3>Windows (10 og 11)</h3>
 <ol>
-  <li>Hent <code>ArtilodySoundsculp-1.1.1-Windows-Setup.exe</code> og dobbeltklik på den.</li>
+  <li>Hent <code>ArtilodySoundsculp-1.1.2-Windows-Setup.exe</code> og dobbeltklik på den.</li>
   <li>Viser Windows SmartScreen "Windows beskyttede din pc", så klik <b>Flere oplysninger</b> → <b>Kør alligevel</b>.</li>
   <li>Følg guiden. Programmet og manualerne findes derefter i Start-menuen.</li>
 </ol>
 <p>Der findes også en <i>Portable</i>-zip, som kan pakkes ud og køres uden installation.</p>
 <h3>macOS (11 eller nyere, Intel og Apple Silicon)</h3>
 <ol>
-  <li>Hent <code>ArtilodySoundsculp-1.1.1-macOS-Universal.dmg</code>, åbn den og træk programmet over i <b>Programmer</b>.</li>
+  <li>Hent <code>ArtilodySoundsculp-1.1.2-macOS-Universal.dmg</code>, åbn den og træk programmet over i <b>Programmer</b>.</li>
   <li>Første gang: højreklik på programmet, vælg <b>Åbn</b> og bekræft. Hjælper det ikke, så skriv i Terminal:
       <code>xattr -cr "/Applications/Artilody Soundsculp.app"</code></li>
   <li>Når du optager første gang, beder macOS om adgang til mikrofonen – svar <b>OK</b>.</li>
 </ol>
 <h3>Debian (12+) og Ubuntu (22.04 / 24.04)</h3>
 <p>Hent den <code>.deb</code>-fil der passer til dit system og installér med fx:</p>
-<p><code>sudo apt install ./artilody-soundsculp_1.1.1_debian-12_amd64.deb</code></p>
+<p><code>sudo apt install ./artilody-soundsculp_1.1.2_debian-12_amd64.deb</code></p>
 <p>Programmet findes i programmenuen under <b>Lyd og video</b> eller startes med <code>artilody-soundsculp</code>.
-MP3-, M4A- og Opus-eksport bruger <code>ffmpeg</code>: <code>sudo apt install ffmpeg</code>. Afinstallér med <code>sudo apt remove artilody-soundsculp</code>.</p>
+Pakken er selvstændig – alt hvad programmet skal bruge (også ffmpeg til MP3, M4A og Opus) følger med, så der skal ikke hentes andet. Afinstallér med <code>sudo apt remove artilody-soundsculp</code>.</p>
 
 <div class="page-break"></div>
 <h2>3. Skærmbilledet</h2>
@@ -216,7 +216,7 @@ Lydenheder vælges under <b>Settings → Audio settings…</b>.</p>
 <ul>
   <li><b>What to export</b>: <i>Current track</i> (aktuelt spor), <i>Selection only</i> (kun markering) eller <i>All tracks mixed</i> (alle spor mixet til én fil – spor med M udelades, solo-spor vinder).</li>
   <li><b>Format</b>: Ukomprimeret (WAV 16/24/32-bit, AIFF), Tabsfri (FLAC 16/24, Apple Lossless) eller Komprimeret (MP3 320/192, OGG, M4A/AAC, Opus).
-      MP3, M4A og Opus kræver ffmpeg (følger med på Windows og macOS).</li>
+      ffmpeg til MP3, M4A og Opus følger med på alle systemer.</li>
   <li><b>File name</b> og <b>Folder</b> (med <b>Choose…</b>). Filtypen skifter automatisk med formatet.</li>
 </ul>
 <p>Informationslinjen viser længde, samplerate, stereo/mono og cirka filstørrelse. Volumenlinjer medregnes altid.
@@ -245,7 +245,7 @@ Programmet husker sidste format og mappe. Findes filen, spørges der før den er
 <ul>
   <li><b>Ingen lyd</b>: tjek udgangsenheden under <b>Settings → Audio settings</b>, og at sporene ikke står på M (mute).</li>
   <li><b>Optagelse virker ikke</b>: vælg en indgangsenhed i Audio settings. På macOS: giv mikrofonadgang i Systemindstillinger → Anonymitet og sikkerhed → Mikrofon.</li>
-  <li><b>MP3/M4A/Opus er gråtonet</b>: ffmpeg mangler (Linux: <code>sudo apt install ffmpeg</code>, macOS: <code>brew install ffmpeg</code>).</li>
+  <li><b>MP3/M4A/Opus er gråtonet</b>: den medfølgende ffmpeg mangler – geninstallér programmet.</li>
   <li><b>macOS siger at appen er beskadiget</b>: <code>xattr -cr "/Applications/Artilody Soundsculp.app"</code> i Terminal.</li>
 </ul>
 <p>Fejl og ønsker kan meldes på GitHub under <b>Issues</b>. Artilody Soundsculp er fri software under GPL-3.0 og er bygget med JUCE.</p>

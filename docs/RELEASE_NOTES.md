@@ -1,19 +1,20 @@
-## Artilody Soundsculp 1.1.1
+## Artilody Soundsculp 1.1.2
 
 ### Download
 | System | File |
 |---|---|
-| Windows 10/11 (64-bit) | `ArtilodySoundsculp-1.1.1-Windows-Setup.exe` (installer) or `…-Windows-Portable.zip` |
-| macOS 11+ (Intel + Apple Silicon) | `ArtilodySoundsculp-1.1.1-macOS-Universal.dmg` |
-| Debian 12+ | `artilody-soundsculp_1.1.1_debian-12_amd64.deb` |
-| Ubuntu 22.04 / 24.04 | `artilody-soundsculp_1.1.1_ubuntu-22.04-24.04_amd64.deb` |
+| Windows 10/11 (64-bit) | `ArtilodySoundsculp-1.1.2-Windows-Setup.exe` (installer) or `…-Windows-Portable.zip` |
+| macOS 11+ (Intel + Apple Silicon) | `ArtilodySoundsculp-1.1.2-macOS-Universal.dmg` |
+| Debian 12+ | `artilody-soundsculp_1.1.2_debian-12_amd64.deb` |
+| Ubuntu 22.04 / 24.04 | `artilody-soundsculp_1.1.2_ubuntu-22.04-24.04_amd64.deb` |
 
 User manuals: `Artilody-Soundsculp-Manual-EN.pdf` (English) and `Artilody-Soundsculp-Manual-DA.pdf` (Danish).
 
 Linux: `sudo apt install ./artilody-soundsculp_*.deb` · macOS: first launch with right-click → Open (the app is not notarised).
 
-### Fixed in 1.1.1
-- Linux packages no longer install the JUCE development files (package size 30 MB → about 5 MB)
+### Fixed in 1.1.2
+- Linux packages are now **self-contained**: ffmpeg (MP3/M4A/Opus export) is included, nothing has to be installed from third parties
+- Linux packages no longer install the JUCE development files into /usr/include
 - The app icon (from the new Artilody Soundsculp logo) now shows correctly in the Linux application menu; icons are installed in 48–512 px and the menu/icon caches are refreshed on install
 
 ### New in 1.1 (since 1.0)

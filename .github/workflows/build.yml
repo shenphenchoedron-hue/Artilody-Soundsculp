@@ -37,7 +37,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y git cmake g++ make pkg-config file \
             libasound2-dev libjack-jackd2-dev libfreetype-dev libfontconfig1-dev libx11-dev \
             libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev \
-            libgl1-mesa-dev xvfb xauth ffmpeg ca-certificates
+            libgl1-mesa-dev xvfb xauth ffmpeg ca-certificates curl xz-utils
       - name: Install dependencies (Ubuntu)
         if: matrix.container == ''
         run: |
@@ -47,8 +47,17 @@ jobs:
             libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev \
             libgl1-mesa-dev xvfb ffmpeg
       - uses: actions/checkout@v5
+      - name: Download static ffmpeg (bundled in the package)
+        run: |
+          curl -fsSL -o ffmpeg-static.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz \
+            || curl -fsSL -o ffmpeg-static.tar.xz https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
+          mkdir -p ffmpeg-static
+          tar -xJf ffmpeg-static.tar.xz -C ffmpeg-static
+          cp "$(find ffmpeg-static -type f -name ffmpeg | head -1)" ffmpeg-bundled
+          chmod +x ffmpeg-bundled
+          ./ffmpeg-bundled -hide_banner -encoders | grep -E "libmp3lame|libopus"
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUNDLE_FFMPEG="$PWD/ffmpeg-bundled"
       - name: Build
         run: cmake --build build --config Release -j4
       - name: Self test
@@ -59,6 +68,7 @@ jobs:
         run: |
           cd build
           cpack -G DEB
+          dpkg-deb -c artilody-soundsculp_*_amd64.deb | grep -q "lib/artilody-soundsculp/ffmpeg"
           mkdir -p ../dist
           VERSION=$(grep -m1 "project(ArtilodySoundsculp VERSION" ../CMakeLists.txt | sed -E 's/.*VERSION ([0-9.]+).*/\1/')
           mv artilody-soundsculp_*_amd64.deb "../dist/artilody-soundsculp_${VERSION}_${{ matrix.label }}_amd64.deb"
