@@ -5,6 +5,7 @@
 #include "AudioDocument.h"
 #include "AudioEngine.h"
 #include "WaveformView.h"
+#include "TrackStack.h"
 #include "EQPanel.h"
 #include "NoisePanel.h"
 #include "SidePanels.h"
@@ -48,8 +49,8 @@ private:
     TracksPanel tracksPanel;
     FilePanel filePanel;
     MarkersPanel markersPanel;
-    WaveformView waveform { engine };
-    OverviewView overview { waveform };
+    Timeline timeline;
+    TrackStack trackStack { engine, timeline };
     EQPanel eqPanel;
     NoisePanel noisePanel;
     StatusBar statusBar;
@@ -89,7 +90,7 @@ private:
     void duplicateTrack();
     void renameTrack();
     void showMergeDialog();
-    void exportAudio (int scope, const FileIO::ExportFormat& format);
+    void exportAudio (int scope, const FileIO::ExportFormat& format, const juce::File& file);
     void showAudioSettings();
     void showShortcuts();
 
@@ -117,7 +118,14 @@ private:
     void applyNoise();
     std::vector<float> getNoiseProfile();
     void updateNoiseMaterial();
-    void insertBufferAtCursor (juce::AudioBuffer<float> data, double rate, const juce::String& undoName);
+    void insertBufferAtCursor (juce::AudioBuffer<float> data, double rate, const juce::String& undoName, const juce::String& clipName = {});
+    void applyToRange (const juce::String& undoName, juce::int64 s, juce::int64 e,
+                       const std::function<void (juce::AudioBuffer<float>&, juce::int64)>& fn);
+    void doRippleDelete();
+    void doSplit();
+    void doJoin();
+    void moveClipToTrack (int fromIndex, int clipIndex, int toIndex);
+    void showWaveContextMenu (int laneIndex, juce::int64 sample);
     juce::AudioBuffer<float> mixTracks (const std::vector<AudioDocument*>& tracks, double& rateOut, bool& normalised);
     void addMarkerAtCursor();
     void undo();
@@ -137,6 +145,14 @@ private:
     void updateStatus();
     void updateZoomControls();
     void setZoomFromSlider (double v);
+    double zoomAnchor() const;
+    void zoomTo (double secPerPixel);
+    void zoomBy (double factor);
+    void zoomFit();
+    void zoomToSelection();
+    void ensureVisibleSec (double t);
+    void viewChanged();
+    void updateTimelineTotal();
     void setPanelsVisible (bool eq, bool noise);
     void showMessage (const juce::String& m);
     void showError (const juce::String& title, const juce::String& m);

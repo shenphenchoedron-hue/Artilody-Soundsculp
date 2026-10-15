@@ -140,7 +140,13 @@ bool AudioEngine::startRecording (AudioDocument* target, juce::String& error)
     {
         const juce::ScopedLock sl (target->lock);
         target->sampleRate = deviceRate.load();
-        target->buffer.setSize (recordChannels, 0);
+        target->numChannels = recordChannels;
+        target->clips.clear();
+        Clip c;
+        c.start = 0;
+        c.name = target->name;
+        c.audio.setSize (recordChannels, 0);
+        target->clips.push_back (std::move (c));
     }
 
     recording = true;
@@ -165,7 +171,10 @@ void AudioEngine::stopRecording()
 
         {
             const juce::ScopedLock sl (recordTarget->lock);
-            recordTarget->buffer = std::move (owned);
+            if (recordedSamples > 0 && ! recordTarget->clips.empty())
+                recordTarget->clips[0].audio = std::move (owned);
+            else
+                recordTarget->clips.clear();
         }
         recordTarget->changed();
     }
@@ -218,9 +227,10 @@ void AudioEngine::timerCallback()
 
     {
         const juce::ScopedLock sl (recordTarget->lock);
-        recordTarget->buffer.setDataToReferTo (recordPointers.data(), recordChannels, (int) recordedSamples);
+        if (recordTarget->clips.empty()) return;
+        recordTarget->clips[0].audio.setDataToReferTo (recordPointers.data(), recordChannels, (int) recordedSamples);
     }
-    recordTarget->rebuildPeaks (oldLen);
+    recordTarget->clips[0].rebuildPeaks (oldLen);
     recordTarget->cursor = recordedSamples;
     recordTarget->sendChangeMessage();
 }
@@ -248,10 +258,6 @@ void AudioEngine::renderDocument (AudioDocument& doc, double startTime, int numS
     if (! tl.isLocked())
         return;
 
-    const auto len = doc.getLength();
-    const int chans = doc.getNumChannels();
-    if (len == 0 || chans == 0) return;
-
     const double ratio = doc.sampleRate / deviceRate.load();
     const double startPos = startTime * doc.sampleRate;
 
@@ -259,22 +265,35 @@ void AudioEngine::renderDocument (AudioDocument& doc, double startTime, int numS
     const float g0 = doc.gainAt (startTime);
     const float g1 = doc.gainAt (startTime + numSamples / deviceRate.load());
 
-    for (int oc = 0; oc < dest.getNumChannels(); ++oc)
+    for (auto& clip : doc.clips)
     {
-        const int sc = juce::jmin (oc, chans - 1);
-        const float* src = doc.buffer.getReadPointer (sc);
-        float* out = dest.getWritePointer (oc);
+        const auto len = clip.length();
+        const int chans = clip.audio.getNumChannels();
+        if (len == 0 || chans == 0) continue;
 
-        for (int i = 0; i < numSamples; ++i)
+        // output range where this clip is active
+        const double rel0 = startPos - (double) clip.start;           // clip position at output sample 0
+        int i0 = (int) std::ceil (-rel0 / ratio);
+        int i1 = (int) std::ceil (((double) len - rel0) / ratio);
+        i0 = juce::jlimit (0, numSamples, i0);
+        i1 = juce::jlimit (0, numSamples, i1);
+        if (i1 <= i0) continue;
+
+        for (int oc = 0; oc < dest.getNumChannels(); ++oc)
         {
-            const double p = startPos + i * ratio;
-            const auto idx = (juce::int64) p;
-            if (idx < 0 || idx >= len) continue;
-            const float frac = (float) (p - (double) idx);
-            const float a = src[idx];
-            const float b = idx + 1 < len ? src[idx + 1] : a;
-            const float g = g0 + (g1 - g0) * ((float) i / (float) numSamples);
-            out[i] += (a + (b - a) * frac) * g;
+            const float* src = clip.audio.getReadPointer (juce::jmin (oc, chans - 1));
+            float* out = dest.getWritePointer (oc);
+            for (int i = i0; i < i1; ++i)
+            {
+                const double p = rel0 + i * ratio;
+                const auto idx = (juce::int64) p;
+                if (idx < 0 || idx >= len) continue;
+                const float frac = (float) (p - (double) idx);
+                const float a = src[idx];
+                const float b = idx + 1 < len ? src[idx + 1] : a;
+                const float g = g0 + (g1 - g0) * ((float) i / (float) numSamples);
+                out[i] += (a + (b - a) * frac) * g;
+            }
         }
     }
 }
@@ -375,8 +394,11 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, 
 
             if (mixAll.load())
             {
+                bool anySolo = false;
+                for (auto* d : documents) anySolo = anySolo || d->soloed.load();
                 for (auto* d : documents)
-                    renderDocument (*d, t, todo, chunk);
+                    if (anySolo ? d->soloed.load() : ! d->muted.load())
+                        renderDocument (*d, t, todo, chunk);
             }
             else if (current != nullptr)
             {

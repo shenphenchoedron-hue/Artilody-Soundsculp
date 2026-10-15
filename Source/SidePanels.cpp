@@ -25,6 +25,14 @@ TracksPanel::TracksPanel() : Card (T ("Tracks", "Spor"))
                              "Nyt tomt spor, åbn filer, indsæt fil, flet spor..."));
     addButton.onClick = [this] { if (onAddMenu) onAddMenu(); };
     addAndMakeVisible (addButton);
+    openButton.setColours (Theme::accentSoft, Theme::accent);
+    openButton.setTooltip (T ("Open audio files (Ctrl+O)", "Åbn lydfiler (Ctrl+O)"));
+    openButton.onClick = [this] { if (onOpen) onOpen(); };
+    addAndMakeVisible (openButton);
+    mergeButton.setColours (Theme::accentSoft, Theme::accent);
+    mergeButton.setTooltip (T ("Merge several tracks into one new track", "Flet flere spor sammen til ét nyt spor"));
+    mergeButton.onClick = [this] { if (onMerge) onMerge(); };
+    addAndMakeVisible (mergeButton);
 
     viewport.setViewedComponent (&list, false);
     viewport.setScrollBarsShown (true, false);
@@ -58,6 +66,13 @@ void TracksPanel::setTracks (const std::vector<AudioDocument*>& tracks, int curr
 void TracksPanel::resized()
 {
     addButton.setBounds (getHeaderButtonArea());
+    auto hb = getHeaderButtonArea();
+    auto x = hb.getX() - 6;
+    auto mw = mergeButton.getIdealWidth (28);
+    mergeButton.setBounds (x - mw, hb.getY(), mw, 28);
+    x -= mw + 6;
+    auto ow = openButton.getIdealWidth (28);
+    openButton.setBounds (x - ow, hb.getY(), ow, 28);
     viewport.setBounds (getContentArea().withTrimmedTop (2));
     const int rowH = 40;
     list.setSize (viewport.getMaximumVisibleWidth(), rows.size() * rowH);
@@ -174,6 +189,20 @@ void MarkersPanel::setDocument (AudioDocument* d)
 {
     doc = d;
     refresh();
+    repaint();
+}
+
+void MarkersPanel::paint (juce::Graphics& g)
+{
+    Card::paint (g);
+    // show which track the markers belong to
+    if (doc != nullptr)
+    {
+        auto x = 16 + (int) Theme::textWidth (Theme::font (17.0f, true), title) + 8;
+        g.setColour (Theme::textDim);
+        g.setFont (Theme::font (13.0f));
+        g.drawText ("- " + doc->name, x, 10, getWidth() - x - 46, 28, juce::Justification::centredLeft, true);
+    }
 }
 
 void MarkersPanel::refresh()
@@ -189,6 +218,8 @@ void MarkersPanel::refresh()
     {
         if (! r->nameEditor.hasKeyboardFocus (true))
             r->nameEditor.setText (doc->markers[(size_t) r->index].name, false);
+        r->colourButton.colour = doc->markers[(size_t) r->index].colour;
+        r->colourButton.repaint();
         r->repaint();
     }
     resized();
@@ -251,6 +282,45 @@ MarkersPanel::Row::Row (MarkersPanel& o, int i) : owner (o), index (i)
         });
     };
     addAndMakeVisible (deleteButton);
+
+    colourButton.setTooltip (T ("Change the marker colour", "Skift markørens farve"));
+    colourButton.onClick = [this] { owner.chooseColour (index, colourButton.getScreenBounds()); };
+    addAndMakeVisible (colourButton);
+}
+
+void MarkersPanel::Row::ColourButton::paintButton (juce::Graphics& g, bool highlighted, bool)
+{
+    auto h = (float) getHeight();
+    if (highlighted)
+    {
+        g.setColour (Theme::border);
+        g.fillRoundedRectangle (getLocalBounds().toFloat(), 4.0f);
+    }
+    juce::Path tri;
+    tri.addTriangle (3.0f, h * 0.5f - 7, 3.0f, h * 0.5f + 7, 15.0f, h * 0.5f);
+    g.setColour (colour);
+    g.fillPath (tri);
+    if (colour.getBrightness() > 0.9f)
+    {
+        g.setColour (Theme::textDim);
+        g.strokePath (tri, juce::PathStrokeType (1.0f));
+    }
+}
+
+void MarkersPanel::chooseColour (int index, juce::Rectangle<int> screenArea)
+{
+    if (doc == nullptr || ! juce::isPositiveAndBelow (index, (int) doc->markers.size())) return;
+    doc->pushUndo (T ("Marker colour", "Markørfarve"));
+    juce::Component::SafePointer<MarkersPanel> safe (this);
+    auto* d = doc;
+    showColourPicker (screenArea, doc->markers[(size_t) index].colour, [safe, d, index] (juce::Colour c)
+    {
+        if (safe == nullptr || safe->doc != d || ! juce::isPositiveAndBelow (index, (int) d->markers.size())) return;
+        d->markers[(size_t) index].colour = c;
+        d->annotationsChanged();
+        safe->refresh();
+        if (safe->onChanged) safe->onChanged();
+    });
 }
 
 void MarkersPanel::Row::paint (juce::Graphics& g)
@@ -259,14 +329,11 @@ void MarkersPanel::Row::paint (juce::Graphics& g)
     auto& m = owner.doc->markers[(size_t) index];
     auto h = (float) getHeight();
 
-    juce::Path tri;
-    tri.addTriangle (4.0f, h * 0.5f - 7, 4.0f, h * 0.5f + 7, 16.0f, h * 0.5f);
-    g.setColour (Theme::markerColour (m.colour));
-    g.fillPath (tri);
+    juce::ignoreUnused (h);
 
     g.setColour (Theme::text);
     g.setFont (Theme::font (13.5f, true));
-    g.drawText (juce::String (index + 1).paddedLeft ('0', 2), 20, 0, 24, getHeight(), juce::Justification::centredLeft);
+    g.drawText (juce::String (index + 1), 20, 0, 24, getHeight(), juce::Justification::centredLeft);
 
     g.setColour (Theme::textDim);
     g.setFont (Theme::font (12.5f));
@@ -275,6 +342,7 @@ void MarkersPanel::Row::paint (juce::Graphics& g)
 
 void MarkersPanel::Row::resized()
 {
+    colourButton.setBounds (0, 4, 20, getHeight() - 8);
     nameEditor.setBounds (44, 3, getWidth() - 44 - 108, getHeight() - 6);
     deleteButton.setBounds (getWidth() - 22, (getHeight() - 18) / 2, 18, 18);
 }

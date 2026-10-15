@@ -1,13 +1,18 @@
 #include "WaveformView.h"
 #include "Theme.h"
 
-static float markerFlagWidth (int index, const juce::String& name)
+// Markers under the track only show their number; the text is in the Markers panel.
+static juce::String markerLabel (int index)
 {
-    auto label = juce::String (index + 1).paddedLeft ('0', 2) + " " + name;
-    return juce::jmin (220.0f, Theme::textWidth (Theme::font (13.0f, true), label) + 18.0f);
+    return juce::String (index + 1);
 }
 
-WaveformView::WaveformView (AudioEngine& e) : engine (e)
+static float markerFlagWidth (int index, const juce::String&)
+{
+    return juce::jmax (22.0f, Theme::textWidth (Theme::font (13.0f, true), markerLabel (index)) + 14.0f);
+}
+
+WaveformView::WaveformView (AudioEngine& e, Timeline& t) : engine (e), timeline (t)
 {
     setWantsKeyboardFocus (false);
     setOpaque (true);
@@ -20,23 +25,29 @@ void WaveformView::setDocument (AudioDocument* d)
 }
 
 //==============================================================================
+double WaveformView::rate() const
+{
+    return doc != nullptr ? doc->sampleRate : 44100.0;
+}
+
+double WaveformView::viewStartSamples() const
+{
+    return timeline.startSec * rate();
+}
+
 double WaveformView::getTotalViewSamples() const
 {
-    if (doc == nullptr) return 44100.0 * 30.0;
-    // Empty tracks show 30 seconds so a position can be clicked before pasting
-    return doc->getLength() > 0 ? juce::jmax (100.0, (double) doc->getLength()) : doc->sampleRate * 30.0;
+    return timeline.totalSec * rate();
 }
 
 double WaveformView::getFitSamplesPerPixel() const
 {
-    return getTotalViewSamples() / (double) juce::jmax (1, waveArea.getWidth());
+    return timeline.fitSecPerPixel() * rate();
 }
 
 double WaveformView::getSamplesPerPixel() const
 {
-    if (doc == nullptr || doc->samplesPerPixel <= 0.0)
-        return getFitSamplesPerPixel();
-    return doc->samplesPerPixel;
+    return timeline.effSecPerPixel() * rate();
 }
 
 double WaveformView::getVisibleSamples() const
@@ -46,23 +57,14 @@ double WaveformView::getVisibleSamples() const
 
 void WaveformView::scrollTo (double startSample)
 {
-    if (doc == nullptr) return;
-    auto maxStart = juce::jmax (0.0, getTotalViewSamples() - getVisibleSamples());
-    doc->viewStart = juce::jlimit (0.0, maxStart, startSample);
-    repaint();
+    timeline.scrollTo (startSample / rate());
     if (onViewChanged) onViewChanged();
 }
 
 void WaveformView::setSamplesPerPixel (double spp, double anchorSample)
 {
-    if (doc == nullptr) return;
-    const double fit = getFitSamplesPerPixel();
-    spp = juce::jlimit (0.02, fit, spp);
-    const float anchorX = xForSample (anchorSample);
-    doc->samplesPerPixel = spp >= fit * 0.999 ? 0.0 : spp;
-    if (doc->samplesPerPixel == 0.0)
-        doc->viewStart = 0.0;
-    scrollTo (anchorSample - (anchorX - (float) waveArea.getX()) * getSamplesPerPixel());
+    timeline.zoomTo (spp / rate(), anchorSample / rate(), (double) (xForSample (anchorSample) - (float) waveArea.getX()));
+    if (onViewChanged) onViewChanged();
 }
 
 void WaveformView::zoom (double factor)
@@ -70,25 +72,22 @@ void WaveformView::zoom (double factor)
     if (doc == nullptr) return;
     double anchor = doc->hasSelection() ? (double) (doc->selStart + doc->selEnd) * 0.5
                                         : (double) doc->cursor;
-    if (anchor < doc->viewStart || anchor > doc->viewStart + getVisibleSamples())
-        anchor = doc->viewStart + getVisibleSamples() * 0.5;
+    if (anchor < viewStartSamples() || anchor > viewStartSamples() + getVisibleSamples())
+        anchor = viewStartSamples() + getVisibleSamples() * 0.5;
     setSamplesPerPixel (getSamplesPerPixel() / factor, anchor);
 }
 
 void WaveformView::zoomToFit()
 {
-    if (doc == nullptr) return;
-    doc->samplesPerPixel = 0.0;
-    doc->viewStart = 0.0;
-    repaint();
+    timeline.secPerPixel = 0.0;
+    timeline.startSec = 0.0;
     if (onViewChanged) onViewChanged();
 }
 
 void WaveformView::ensureVisible (double sample)
 {
-    if (doc == nullptr) return;
     auto vis = getVisibleSamples();
-    if (sample < doc->viewStart || sample > doc->viewStart + vis)
+    if (sample < viewStartSamples() || sample > viewStartSamples() + vis)
         scrollTo (sample - vis * 0.05);
 }
 
@@ -96,13 +95,13 @@ void WaveformView::ensureVisible (double sample)
 float WaveformView::xForSample (double s) const
 {
     if (doc == nullptr) return (float) waveArea.getX();
-    return (float) waveArea.getX() + (float) ((s - doc->viewStart) / getSamplesPerPixel());
+    return (float) waveArea.getX() + (float) ((s - viewStartSamples()) / getSamplesPerPixel());
 }
 
 double WaveformView::sampleForX (float x) const
 {
     if (doc == nullptr) return 0.0;
-    return doc->viewStart + (double) (x - (float) waveArea.getX()) * getSamplesPerPixel();
+    return viewStartSamples() + (double) (x - (float) waveArea.getX()) * getSamplesPerPixel();
 }
 
 juce::int64 WaveformView::clampSample (double s) const
@@ -112,13 +111,13 @@ juce::int64 WaveformView::clampSample (double s) const
 
 float WaveformView::yForGain (float gain) const
 {
-    auto r = waveArea.toFloat().reduced (0, 12);
+    auto r = waveArea.withTrimmedTop (clipBarHeight).toFloat().reduced (0, 12);
     return r.getBottom() - (gain / AudioDocument::maxEnvelopeGain) * r.getHeight();
 }
 
 float WaveformView::gainForY (float y) const
 {
-    auto r = waveArea.toFloat().reduced (0, 12);
+    auto r = waveArea.withTrimmedTop (clipBarHeight).toFloat().reduced (0, 12);
     return juce::jlimit (0.0f, AudioDocument::maxEnvelopeGain,
                          (r.getBottom() - y) / r.getHeight() * AudioDocument::maxEnvelopeGain);
 }
@@ -143,6 +142,18 @@ bool WaveformView::isNearEnvelopeLine (juce::Point<float> p) const
     return std::abs (yForGain (g) - p.y) < 7.0f;
 }
 
+int WaveformView::findClipBarAt (juce::Point<float> p) const
+{
+    if (doc == nullptr || p.y < (float) waveArea.getY() || p.y > (float) (waveArea.getY() + clipBarHeight)) return -1;
+    for (int i = 0; i < (int) doc->clips.size(); ++i)
+    {
+        auto& c = doc->clips[(size_t) i];
+        if (p.x >= xForSample ((double) c.start) && p.x < xForSample ((double) c.end()))
+            return i;
+    }
+    return -1;
+}
+
 int WaveformView::findMarkerAt (juce::Point<float> p) const
 {
     if (doc == nullptr) return -1;
@@ -162,9 +173,11 @@ int WaveformView::findMarkerAt (juce::Point<float> p) const
 void WaveformView::resized()
 {
     auto r = getLocalBounds();
-    rulerArea = r.removeFromTop (rulerHeight).withTrimmedLeft (gutter);
+    rulerArea = r.removeFromTop (showRuler ? rulerHeight : 0).withTrimmedLeft (gutter);
     laneArea = r.removeFromBottom (markerLaneHeight).withTrimmedLeft (gutter);
     waveArea = r.withTrimmedLeft (gutter);
+    if (waveArea.getWidth() > 0)
+        timeline.width = waveArea.getWidth();
 }
 
 void WaveformView::paint (juce::Graphics& g)
@@ -180,10 +193,16 @@ void WaveformView::paint (juce::Graphics& g)
         return;
     }
 
-    drawRuler (g);
+    if (showRuler) drawRuler (g);
+    drawClips (g);
     drawChannels (g);
     drawEnvelope (g);
     drawMarkerLane (g);
+    if (doc->muted.load())
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.4f));
+        g.fillRect (waveArea);
+    }
     drawPlayhead (g);
 }
 
@@ -206,7 +225,7 @@ void WaveformView::drawRuler (juce::Graphics& g)
     const double secsPerPixel = getSamplesPerPixel() / sr;
     const double major = niceStep (secsPerPixel * 80.0);
     const double minor = major / 5.0;
-    const double t0 = doc->viewStart / sr;
+    const double t0 = viewStartSamples() / sr;
     const double t1 = t0 + getVisibleSamples() / sr;
 
     g.setFont (Theme::font (12.0f));
@@ -235,7 +254,7 @@ void WaveformView::drawRuler (juce::Graphics& g)
         if (x < (float) rulerArea.getX() - 8 || x > (float) getWidth() + 8) continue;
         juce::Path tri;
         tri.addTriangle (x - 7, (float) full.getBottom() - 14, x + 7, (float) full.getBottom() - 14, x, (float) full.getBottom() - 2);
-        g.setColour (Theme::markerColour (m.colour));
+        g.setColour (m.colour);
         g.fillPath (tri);
     }
 
@@ -251,17 +270,50 @@ void WaveformView::drawRuler (juce::Graphics& g)
     }
 }
 
+void WaveformView::drawClips (juce::Graphics& g)
+{
+    // gaps (no audio) are darker than the clips
+    g.setColour (juce::Colour (0xff0e1426));
+    g.fillRect (waveArea);
+
+    g.setFont (Theme::font (11.5f, true));
+    for (int i = 0; i < (int) doc->clips.size(); ++i)
+    {
+        auto& clip = doc->clips[(size_t) i];
+        const float x1 = juce::jmax ((float) waveArea.getX(), xForSample ((double) clip.start));
+        const float x2 = juce::jmin ((float) waveArea.getRight(), xForSample ((double) clip.end()));
+        if (x2 <= x1) continue;
+        auto body = juce::Rectangle<float> (x1, (float) waveArea.getY(), x2 - x1, (float) waveArea.getHeight());
+        g.setColour (Theme::waveBg);
+        g.fillRect (body);
+
+        const bool clipSelected = doc->hasSelection() && doc->selStart <= clip.start && doc->selEnd >= clip.end();
+        const bool dragging = drag == Drag::clip && dragIndex == i;
+        auto bar = body.withHeight ((float) clipBarHeight);
+        g.setColour (dragging ? Theme::accent : (clipSelected ? Theme::selection.brighter (0.2f) : juce::Colour (0xff2b3b62)));
+        g.fillRect (bar);
+        g.setColour (juce::Colours::white.withAlpha (0.9f));
+        if (bar.getWidth() > 24)
+            g.drawText (clip.name, bar.reduced (5, 0), juce::Justification::centredLeft, true);
+
+        // clip edges
+        g.setColour (juce::Colour (0xff3d5080));
+        g.drawVerticalLine ((int) xForSample ((double) clip.start), (float) waveArea.getY(), (float) waveArea.getBottom());
+        g.drawVerticalLine ((int) xForSample ((double) clip.end()) - 1, (float) waveArea.getY(), (float) waveArea.getBottom());
+    }
+}
+
 void WaveformView::drawChannels (juce::Graphics& g)
 {
     const int channels = juce::jmax (1, doc->getNumChannels());
-    auto area = waveArea;
+    auto area = waveArea.withTrimmedTop (clipBarHeight);
     const int chH = area.getHeight() / channels;
     const double spp = getSamplesPerPixel();
     const auto len = doc->getLength();
 
     // gutter background
     g.setColour (Theme::waveBg);
-    g.fillRect (0, area.getY(), gutter, area.getHeight());
+    g.fillRect (0, waveArea.getY(), gutter, waveArea.getHeight());
 
     const float selX1 = doc->hasSelection() ? xForSample ((double) doc->selStart) : -1.0f;
     const float selX2 = doc->hasSelection() ? xForSample ((double) doc->selEnd) : -1.0f;
@@ -271,7 +323,7 @@ void WaveformView::drawChannels (juce::Graphics& g)
     {
         auto x = xForSample (m.time * doc->sampleRate);
         if (x < (float) waveArea.getX() || x > (float) waveArea.getRight()) continue;
-        g.setColour (Theme::markerColour (m.colour).withAlpha (0.35f));
+        g.setColour (m.colour.withAlpha (0.35f));
         g.drawVerticalLine ((int) x, (float) waveArea.getY(), (float) waveArea.getBottom());
     }
 
@@ -286,11 +338,16 @@ void WaveformView::drawChannels (juce::Graphics& g)
         g.setFont (Theme::font (11.0f));
         for (float v : { 1.0f, 0.5f, -0.5f, -1.0f })
         {
+            const bool isHalf = std::abs (v) < 0.9f;
+            if (isHalf && chH < 110) continue;          // avoid crowded labels on low tracks
             auto y = mid - v * half;
             g.setColour (Theme::grid.withAlpha (0.8f));
             g.drawHorizontalLine ((int) y, (float) r.getX(), (float) r.getRight());
-            g.setColour (juce::Colours::white.withAlpha (0.55f));
-            g.drawText (juce::String (v, 1), 2, (int) y - 7, gutter - 8, 14, juce::Justification::centredRight);
+            if (chH >= 56)
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.55f));
+                g.drawText (juce::String (v, 1), 2, (int) y - 7, gutter - 8, 14, juce::Justification::centredRight);
+            }
         }
         g.setColour (Theme::grid.brighter (0.2f));
         g.drawHorizontalLine ((int) mid, (float) r.getX(), (float) r.getRight());
@@ -311,81 +368,81 @@ void WaveformView::drawChannels (juce::Graphics& g)
 
         if (c >= doc->getNumChannels() || len == 0)
             continue;
+        juce::ignoreUnused (len);
 
         juce::RectangleList<float> normal, selected;
-        const float* data = doc->buffer.getReadPointer (c);
-        if (doc->peaks.size() <= (size_t) c)
-            doc->rebuildPeaks();
-        auto& peaks = doc->peaks[(size_t) c];
+        const auto viewS0 = viewStartSamples();
+        const auto viewS1 = viewS0 + getVisibleSamples();
 
-        if (spp < 1.0)
+        for (auto& clip : doc->clips)
         {
-            juce::Path p;
-            bool started = false;
-            auto first = (juce::int64) juce::jmax (0.0, std::floor (doc->viewStart));
-            auto last = (juce::int64) juce::jmin ((double) len - 1, std::ceil (doc->viewStart + getVisibleSamples()) + 1);
-            for (auto s = first; s <= last; ++s)
-            {
-                auto x = xForSample ((double) s);
-                auto y = mid - juce::jlimit (-1.2f, 1.2f, data[s]) * half;
-                if (! started) { p.startNewSubPath (x, y); started = true; }
-                else p.lineTo (x, y);
-                if (spp < 0.15)
-                    g.setColour (Theme::waveB), g.fillEllipse (x - 2, y - 2, 4, 4);
-            }
-            g.setColour (Theme::waveB);
-            g.strokePath (p, juce::PathStrokeType (1.5f));
-            continue;
-        }
+            const auto clen = clip.length();
+            if (clen == 0 || clip.end() < viewS0 || (double) clip.start > viewS1) continue;
+            if (c >= clip.audio.getNumChannels()) continue;
+            const float* data = clip.audio.getReadPointer (c);
+            if (clip.peaks.size() <= (size_t) c) clip.rebuildPeaks();
+            auto& peaks = clip.peaks[(size_t) c];
 
-        for (int x = 0; x < area.getWidth(); ++x)
-        {
-            const double s0 = doc->viewStart + x * spp;
-            const double s1 = s0 + spp;
-            if (s1 < 0 || s0 >= (double) len) continue;
-            auto a = (juce::int64) juce::jmax (0.0, s0);
-            auto b = (juce::int64) juce::jmin ((double) len, std::ceil (s1));
-            if (b <= a) b = a + 1;
-            if (b > len) continue;
-
-            float mn = 0, mx = 0;
-            if (spp >= AudioDocument::peakBlock && ! peaks.empty())
+            if (spp < 1.0)
             {
-                auto pa = (size_t) (a / AudioDocument::peakBlock);
-                auto pb = juce::jmin (peaks.size(), (size_t) ((b + AudioDocument::peakBlock - 1) / AudioDocument::peakBlock));
-                mn = 1.0f; mx = -1.0f;
-                for (auto i = pa; i < pb; ++i) { mn = juce::jmin (mn, peaks[i].minV); mx = juce::jmax (mx, peaks[i].maxV); }
-                if (mn > mx) mn = mx = 0;
-            }
-            else
-            {
-                auto range = juce::FloatVectorOperations::findMinAndMax (data + a, (int) (b - a));
-                mn = range.getStart(); mx = range.getEnd();
+                juce::Path p;
+                bool started = false;
+                auto first = (juce::int64) juce::jmax ((double) clip.start, std::floor (viewS0));
+                auto last = (juce::int64) juce::jmin ((double) clip.end() - 1, std::ceil (viewS1) + 1);
+                for (auto sAbs = first; sAbs <= last; ++sAbs)
+                {
+                    auto x = xForSample ((double) sAbs);
+                    auto y = mid - juce::jlimit (-1.2f, 1.2f, data[sAbs - clip.start]) * half;
+                    if (! started) { p.startNewSubPath (x, y); started = true; }
+                    else p.lineTo (x, y);
+                    if (spp < 0.15)
+                        g.setColour (Theme::waveB), g.fillEllipse (x - 2, y - 2, 4, 4);
+                }
+                g.setColour (Theme::waveB);
+                g.strokePath (p, juce::PathStrokeType (1.5f));
+                continue;
             }
 
-            auto y1 = mid - juce::jlimit (-1.0f, 1.0f, mx) * half;
-            auto y2 = mid - juce::jlimit (-1.0f, 1.0f, mn) * half;
-            auto px = (float) (area.getX() + x);
-            juce::Rectangle<float> col (px, y1, 1.0f, juce::jmax (1.0f, y2 - y1));
-            if (px >= selX1 && px < selX2) selected.add (col);
-            else normal.add (col);
+            const int x0 = juce::jmax (0, (int) std::floor (((double) clip.start - viewS0) / spp));
+            const int x1 = juce::jmin (area.getWidth(), (int) std::ceil (((double) clip.end() - viewS0) / spp));
+            for (int x = x0; x < x1; ++x)
+            {
+                const double s0 = viewS0 + x * spp - (double) clip.start;
+                const double s1 = s0 + spp;
+                if (s1 < 0 || s0 >= (double) clen) continue;
+                auto a2 = (juce::int64) juce::jmax (0.0, s0);
+                auto b2 = (juce::int64) juce::jmin ((double) clen, std::ceil (s1));
+                if (b2 <= a2) b2 = a2 + 1;
+                if (b2 > clen) continue;
+
+                float mn = 0, mx = 0;
+                if (spp >= AudioDocument::peakBlock && ! peaks.empty())
+                {
+                    auto pa = (size_t) (a2 / AudioDocument::peakBlock);
+                    auto pb = juce::jmin (peaks.size(), (size_t) ((b2 + AudioDocument::peakBlock - 1) / AudioDocument::peakBlock));
+                    mn = 1.0f; mx = -1.0f;
+                    for (auto i = pa; i < pb; ++i) { mn = juce::jmin (mn, peaks[i].minV); mx = juce::jmax (mx, peaks[i].maxV); }
+                    if (mn > mx) mn = mx = 0;
+                }
+                else
+                {
+                    auto range = juce::FloatVectorOperations::findMinAndMax (data + a2, (int) (b2 - a2));
+                    mn = range.getStart(); mx = range.getEnd();
+                }
+
+                auto y1 = mid - juce::jlimit (-1.0f, 1.0f, mx) * half;
+                auto y2 = mid - juce::jlimit (-1.0f, 1.0f, mn) * half;
+                auto px = (float) (area.getX() + x);
+                juce::Rectangle<float> col (px, y1, 1.0f, juce::jmax (1.0f, y2 - y1));
+                if (px >= selX1 && px < selX2) selected.add (col);
+                else normal.add (col);
+            }
         }
 
         g.setGradientFill (juce::ColourGradient (Theme::waveA, (float) area.getX(), 0, Theme::waveB, (float) area.getRight(), 0, false));
         g.fillRectList (normal);
         g.setGradientFill (juce::ColourGradient (Theme::waveSel, 0, inner.getY(), Theme::waveSel.withRotatedHue (-0.05f), 0, inner.getBottom(), false));
         g.fillRectList (selected);
-    }
-
-    // end of audio
-    if (len > 0)
-    {
-        auto endX = xForSample ((double) len);
-        if (endX < (float) waveArea.getRight())
-        {
-            g.setColour (juce::Colours::black.withAlpha (0.25f));
-            g.fillRect (juce::Rectangle<float> (endX, (float) waveArea.getY(), (float) waveArea.getRight() - endX, (float) waveArea.getHeight()));
-        }
     }
 
     // selection overlay
@@ -521,22 +578,24 @@ void WaveformView::drawMarkerLane (juce::Graphics& g)
     {
         auto& m = doc->markers[(size_t) i];
         auto x = xForSample (m.time * doc->sampleRate);
-        auto col = Theme::markerColour (m.colour);
+        auto col = m.colour;
         auto w = markerFlagWidth (i, m.name);
         auto flag = juce::Rectangle<float> (x, (float) laneArea.getY() + 4.0f, w, (float) laneArea.getHeight() - 8.0f);
         g.setColour (col.withAlpha (i == hoverMarker ? 1.0f : 0.88f));
         g.fillRoundedRectangle (flag, 4.0f);
         g.fillRect (flag.withWidth (3.0f));
-        g.setColour (juce::Colours::white);
+        g.setColour (col.getPerceivedBrightness() > 0.7f ? juce::Colours::black : juce::Colours::white);
         g.setFont (Theme::font (13.0f, true));
-        g.drawText (juce::String (i + 1).paddedLeft ('0', 2) + " " + m.name, flag.reduced (6, 0), juce::Justification::centredLeft, true);
+        g.drawText (markerLabel (i), flag.withTrimmedLeft (3.0f), juce::Justification::centred, false);
     }
     g.restoreState();
 }
 
 void WaveformView::drawPlayhead (juce::Graphics& g)
 {
-    if (! (engine.isPlaying() || (engine.isRecording() && doc->getLength() > 0)))
+    const bool playingHere = engine.isPlaying() && (engine.getMixAll() || isCurrent);
+    const bool recordingHere = engine.isRecording() && isCurrent && doc->getLength() > 0;
+    if (! (playingHere || recordingHere))
         return;
 
     double sample = engine.isRecording() ? (double) doc->getLength() : engine.getPosition() * doc->sampleRate;
@@ -565,6 +624,13 @@ void WaveformView::mouseMove (const juce::MouseEvent& e)
     }
 
     auto cursor = juce::MouseCursor::NormalCursor;
+    if (findClipBarAt (p) >= 0)
+    {
+        setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+        setTooltip (T ("Clip: drag the bar to move the clip - also onto another track. Click selects the clip.",
+                       "Klip: træk i bjælken for at flytte klippet - også til et andet spor. Klik markerer klippet."));
+        return;
+    }
     if (waveArea.contains (e.getPosition()))
     {
         if (hoverEnvelope >= 0)
@@ -590,8 +656,13 @@ void WaveformView::mouseMove (const juce::MouseEvent& e)
                         : T ("Drag to select. Double-click between markers to select that part. Double-click the orange line to add a volume point.",
                              "Træk for at markere. Dobbeltklik mellem markører for at markere den del. Dobbeltklik på den orange linje for at tilføje et volumenpunkt."));
     else if (laneArea.contains (e.getPosition()))
-        setTooltip (T ("Marker line: click to add a marker, drag to move, right-click for options.",
-                       "Markørlinje: klik for at tilføje en markør, træk for at flytte, højreklik for valg."));
+    {
+        if (hoverMarker >= 0)
+            setTooltip (juce::String (hoverMarker + 1) + ": " + doc->markers[(size_t) hoverMarker].name);
+        else
+            setTooltip (T ("Marker line: click to add a marker, drag to move, right-click for options. Type the text in the Markers panel.",
+                           "Markørlinje: klik for at tilføje en markør, træk for at flytte, højreklik for valg. Skriv teksten i Markører-panelet."));
+    }
     else
         setTooltip ({});
 }
@@ -599,6 +670,7 @@ void WaveformView::mouseMove (const juce::MouseEvent& e)
 void WaveformView::mouseDown (const juce::MouseEvent& e)
 {
     if (doc == nullptr) return;
+    if (onActivate) onActivate();
     drag = Drag::none;
     dragMoved = false;
     mouseDownPos = e.getPosition();
@@ -664,6 +736,29 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    // ---- clip title bar: drag to move the clip
+    int clipIdx = findClipBarAt (p);
+    if (clipIdx >= 0 && ! e.mods.isPopupMenu())
+    {
+        auto& c = doc->clips[(size_t) clipIdx];
+        drag = Drag::clip;
+        dragIndex = clipIdx;
+        dragClipOffset = sample - c.start;
+        clipUndoPushed = false;
+        doc->selStart = c.start;
+        doc->selEnd = c.end();
+        doc->cursor = c.start;
+        if (onSelectionChanged) onSelectionChanged();
+        repaint();
+        return;
+    }
+
+    if (e.mods.isPopupMenu())
+    {
+        if (onContextMenu) onContextMenu (sample);
+        return;
+    }
+
     if (tool == Tool::volume && e.mods.isLeftButtonDown())
     {
         doc->pushUndo (T ("Add volume point", "Tilføj volumenpunkt"));
@@ -717,8 +812,8 @@ void WaveformView::mouseDrag (const juce::MouseEvent& e)
     // auto-scroll when dragging outside
     if (drag == Drag::newSelection || drag == Drag::selStartEdge || drag == Drag::selEndEdge)
     {
-        if (p.x > (float) waveArea.getRight()) scrollTo (doc->viewStart + getSamplesPerPixel() * 12);
-        if (p.x < (float) waveArea.getX())     scrollTo (doc->viewStart - getSamplesPerPixel() * 12);
+        if (p.x > (float) waveArea.getRight()) scrollTo (viewStartSamples() + getSamplesPerPixel() * 12);
+        if (p.x < (float) waveArea.getX())     scrollTo (viewStartSamples() - getSamplesPerPixel() * 12);
     }
 
     switch (drag)
@@ -753,6 +848,25 @@ void WaveformView::mouseDrag (const juce::MouseEvent& e)
         case Drag::scrub:
             doc->selStart = doc->selEnd = doc->cursor = sample;
             break;
+        case Drag::clip:
+        {
+            if (! juce::isPositiveAndBelow (dragIndex, (int) doc->clips.size())) return;
+            if (! clipUndoPushed)
+            {
+                doc->pushUndo (T ("Move clip", "Flyt klip"));
+                clipUndoPushed = true;
+            }
+            const auto rawSample = (juce::int64) std::llround (sampleForX (p.x));
+            doc->moveClip (dragIndex, rawSample - dragClipOffset);
+            auto& c = doc->clips[(size_t) dragIndex];
+            doc->selStart = c.start;
+            doc->selEnd = c.end();
+            doc->cursor = c.start;
+            if (onClipDragOver) onClipDragOver (e.getScreenPosition());
+            if (onSelectionChanged) onSelectionChanged();
+            repaint();
+            return;
+        }
         case Drag::none:
         default:
             return;
@@ -787,6 +901,18 @@ void WaveformView::mouseUp (const juce::MouseEvent& e)
     else if (drag == Drag::envelopePoint)
     {
         doc->annotationsChanged();
+    }
+    else if (drag == Drag::clip)
+    {
+        const int idx = dragIndex;
+        drag = Drag::none;
+        dragIndex = -1;
+        bool movedAway = dragMoved && onClipDropped && onClipDropped (idx, e.getScreenPosition());
+        if (! movedAway && clipUndoPushed)
+            doc->changed();
+        if (onClipDragOver) onClipDragOver ({ -100000, -100000 });   // clears the drop highlight
+        repaint();
+        return;
     }
 
     drag = Drag::none;
@@ -844,8 +970,19 @@ void WaveformView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseW
         setSamplesPerPixel (getSamplesPerPixel() / factor, sampleForX (e.position.x));
         return;
     }
+    if (e.mods.isAltDown() && onTrackHeightWheel)
+    {
+        onTrackHeightWheel (w.deltaY > 0 ? 1.15f : 1.0f / 1.15f);
+        return;
+    }
+    const bool horizontal = e.mods.isShiftDown() || std::abs (w.deltaX) > std::abs (w.deltaY);
+    if (! horizontal && wheelScrollsVertically && wheelScrollsVertically())
+    {
+        Component::mouseWheelMove (e, w);    // passes the event on to the track list viewport
+        return;
+    }
     auto delta = std::abs (w.deltaX) > std::abs (w.deltaY) ? w.deltaX : w.deltaY;
-    scrollTo (doc->viewStart - delta * getVisibleSamples() * 0.15);
+    scrollTo (viewStartSamples() - delta * getVisibleSamples() * 0.15);
 }
 
 void WaveformView::showMarkerMenu (int index)
@@ -853,6 +990,7 @@ void WaveformView::showMarkerMenu (int index)
     juce::PopupMenu m;
     m.addItem (1, T ("Rename...", "Omdøb..."));
     m.addItem (2, T ("Select to next marker", "Markér til næste markør"));
+    m.addItem (4, T ("Change colour...", "Skift farve..."));
     m.addItem (3, T ("Delete marker", "Slet markør"));
     juce::Component::SafePointer<WaveformView> safe (this);
     m.showMenuAsync (juce::PopupMenu::Options(), [safe, index] (int r)
@@ -868,6 +1006,20 @@ void WaveformView::showMarkerMenu (int index)
             d->cursor = d->selStart;
             if (safe->onSelectionChanged) safe->onSelectionChanged();
         }
+        else if (r == 4)
+        {
+            d->pushUndo (T ("Marker colour", "Markørfarve"));
+            auto flagX = (int) safe->xForSample (d->markers[(size_t) index].time * d->sampleRate);
+            auto area = juce::Rectangle<int> (flagX, safe->laneArea.getY(), 24, safe->laneArea.getHeight());
+            showColourPicker (safe->localAreaToGlobal (area), d->markers[(size_t) index].colour, [safe, d, index] (juce::Colour c)
+            {
+                if (safe == nullptr || ! juce::isPositiveAndBelow (index, (int) d->markers.size())) return;
+                d->markers[(size_t) index].colour = c;
+                d->annotationsChanged();
+                if (safe->onMarkersChanged) safe->onMarkersChanged (-1);
+                safe->repaint();
+            });
+        }
         else if (r == 3)
         {
             d->pushUndo (T ("Delete marker", "Slet markør"));
@@ -878,96 +1030,3 @@ void WaveformView::showMarkerMenu (int index)
         safe->repaint();
     });
 }
-
-//==============================================================================
-void OverviewView::paint (juce::Graphics& g)
-{
-    auto b = getLocalBounds().toFloat();
-    g.fillAll (Theme::waveBg);
-    auto inner = b.reduced (10.0f, 8.0f);
-    g.setColour (Theme::waveBg2);
-    g.fillRoundedRectangle (inner, 6.0f);
-    g.setColour (Theme::grid.brighter (0.3f));
-    g.drawRoundedRectangle (inner, 6.0f, 1.0f);
-
-    if (doc == nullptr || doc->getLength() == 0)
-        return;
-
-    const double total = mainView.getTotalViewSamples();
-    auto xFor = [&] (double s) { return inner.getX() + (float) (s / total) * inner.getWidth(); };
-    const int channels = doc->getNumChannels();
-    const float chH = inner.getHeight() / (float) channels;
-    const double spp = total / inner.getWidth();
-
-    const float sx1 = doc->hasSelection() ? xFor ((double) doc->selStart) : -1;
-    const float sx2 = doc->hasSelection() ? xFor ((double) doc->selEnd) : -1;
-
-    for (int c = 0; c < channels && c < (int) doc->peaks.size(); ++c)
-    {
-        auto& peaks = doc->peaks[(size_t) c];
-        const float mid = inner.getY() + chH * ((float) c + 0.5f);
-        juce::RectangleList<float> normal, sel;
-        for (int x = 0; x < (int) inner.getWidth(); ++x)
-        {
-            auto a = (size_t) ((double) x * spp / AudioDocument::peakBlock);
-            auto bb = juce::jmin (peaks.size(), (size_t) ((double) (x + 1) * spp / AudioDocument::peakBlock) + 1);
-            if (a >= peaks.size()) break;
-            float mn = 1, mx = -1;
-            for (auto i = a; i < bb; ++i) { mn = juce::jmin (mn, peaks[i].minV); mx = juce::jmax (mx, peaks[i].maxV); }
-            if (mn > mx) continue;
-            auto px = inner.getX() + (float) x;
-            juce::Rectangle<float> r (px, mid - mx * chH * 0.45f, 1.0f, juce::jmax (1.0f, (mx - mn) * chH * 0.45f));
-            (px >= sx1 && px < sx2 ? sel : normal).add (r);
-        }
-        g.setColour (Theme::waveA.withAlpha (0.65f));
-        g.fillRectList (normal);
-        g.setColour (Theme::waveSel.withAlpha (0.9f));
-        g.fillRectList (sel);
-    }
-
-    // visible range
-    auto v1 = xFor (doc->viewStart);
-    auto v2 = xFor (doc->viewStart + mainView.getVisibleSamples());
-    if (v2 - v1 < inner.getWidth() - 2)
-    {
-        g.setColour (juce::Colours::white.withAlpha (0.08f));
-        g.fillRect (juce::Rectangle<float> (v1, inner.getY(), v2 - v1, inner.getHeight()));
-        g.setColour (juce::Colours::white.withAlpha (0.5f));
-        g.drawRect (juce::Rectangle<float> (v1, inner.getY(), v2 - v1, inner.getHeight()), 1.0f);
-    }
-
-    if (doc->hasSelection())
-    {
-        auto sr = juce::Rectangle<float> (sx1, inner.getY(), juce::jmax (1.0f, sx2 - sx1), inner.getHeight());
-        g.setColour (Theme::selection.withAlpha (0.3f));
-        g.fillRect (sr);
-        g.setColour (Theme::accent.brighter (0.4f));
-        g.drawRect (sr, 1.5f);
-        for (auto x : { sx1, sx2 })
-        {
-            auto h = juce::Rectangle<float> (8.0f, 22.0f).withCentre ({ x, inner.getCentreY() });
-            g.setColour (juce::Colours::white);
-            g.fillRoundedRectangle (h, 3.0f);
-        }
-    }
-
-    for (auto& m : doc->markers)
-    {
-        auto x = xFor (m.time * doc->sampleRate);
-        g.setColour (Theme::markerColour (m.colour));
-        g.fillRect (juce::Rectangle<float> (x - 1, inner.getY(), 2, 6));
-    }
-}
-
-void OverviewView::centreAt (float x)
-{
-    if (doc == nullptr) return;
-    auto inner = getLocalBounds().toFloat().reduced (10.0f, 8.0f);
-    const double total = mainView.getTotalViewSamples();
-    double s = (double) ((x - inner.getX()) / inner.getWidth()) * total;
-    mainView.scrollTo (s - mainView.getVisibleSamples() * 0.5);
-    repaint();
-}
-
-void OverviewView::mouseDown (const juce::MouseEvent& e) { centreAt (e.position.x); }
-void OverviewView::mouseDrag (const juce::MouseEvent& e) { centreAt (e.position.x); }

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(ArtilodySoundsculp VERSION 1.0.0 LANGUAGES C CXX)
+project(ArtilodySoundsculp VERSION 1.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,6 +38,11 @@ juce_add_gui_app(ArtilodySoundsculp
 
 juce_generate_juce_header(ArtilodySoundsculp)
 
+juce_add_binary_data(SoundsculpData SOURCES
+    Resources/logo_mark.png
+    Resources/icon_256.png
+)
+
 target_sources(ArtilodySoundsculp PRIVATE
     Source/Main.cpp
     Source/MainComponent.cpp
@@ -51,6 +56,8 @@ target_sources(ArtilodySoundsculp PRIVATE
     Source/SidePanels.cpp
     Source/HeaderBar.cpp
     Source/Theme.cpp
+    Source/TrackStack.cpp
+    Source/ExportDialog.cpp
 )
 
 target_compile_definitions(ArtilodySoundsculp PRIVATE
@@ -67,6 +74,7 @@ target_compile_definitions(ArtilodySoundsculp PRIVATE
 
 target_link_libraries(ArtilodySoundsculp
     PRIVATE
+        SoundsculpData
         juce::juce_gui_extra
         juce::juce_audio_utils
         juce::juce_audio_devices
@@ -95,6 +103,7 @@ if(UNIX AND NOT APPLE)
     install(DIRECTORY docs/pdf/ DESTINATION ${CMAKE_INSTALL_DOCDIR} OPTIONAL)
 
     set(CPACK_GENERATOR "DEB")
+    set(CPACK_STRIP_FILES ON)
     set(CPACK_PACKAGE_NAME "artilody-soundsculp")
     set(CPACK_PACKAGE_VENDOR "Artilody")
     set(CPACK_PACKAGE_CONTACT "Artilody <shenphenchoedron-hue@users.noreply.github.com>")

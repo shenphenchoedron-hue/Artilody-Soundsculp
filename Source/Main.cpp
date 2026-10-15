@@ -1,5 +1,7 @@
 #include <JuceHeader.h>
 #include "MainComponent.h"
+#include "ExportDialog.h"
+#include <BinaryData.h>
 
 //==============================================================================
 class SoundsculpApplication : public juce::JUCEApplication
@@ -20,7 +22,7 @@ public:
 
         auto lang = properties.getUserSettings()->getValue ("language", {});
         if (lang.isEmpty())
-            lang = juce::SystemStats::getUserLanguage().startsWithIgnoreCase ("da") ? "da" : "en";
+            lang = "en";                       // the app is English by default
         auto args = juce::StringArray::fromTokens (commandLine, true);
         args.trim();
         for (auto& a : args) a = a.unquoted();
@@ -43,6 +45,26 @@ public:
         {
             auto failures = mainWindow->getMain()->runUiTest();
             setApplicationReturnValue (failures == 0 ? 0 : 1);
+            juce::MessageManager::callAsync ([] { quit(); });
+            return;
+        }
+
+        auto exportShot = args.indexOf ("--screenshot-export");
+        if (exportShot >= 0 && exportShot + 1 < args.size())
+        {
+            ExportDialog::Options o;
+            o.hasTrack = o.hasSelection = o.multipleTracks = true;
+            o.trackSeconds = 12.68; o.selectionSeconds = 4.24; o.mixSeconds = 12.68;
+            o.trackName = "electric_piano_phrase.wav";
+            o.folder = juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+            o.lastFormatId = "wav24";
+            ExportDialog dlg (o);
+            auto img = dlg.createComponentSnapshot (dlg.getLocalBounds(), true, 1.0f);
+            auto target = juce::File::getCurrentWorkingDirectory().getChildFile (args[exportShot + 1]);
+            target.deleteFile();
+            juce::FileOutputStream os (target);
+            juce::PNGImageFormat().writeImageToStream (img, os);
+            os.flush();
             juce::MessageManager::callAsync ([] { quit(); });
             return;
         }
@@ -117,6 +139,7 @@ public:
             : DocumentWindow ("Artilody Soundsculp", Theme::background, DocumentWindow::allButtons)
         {
             setUsingNativeTitleBar (true);
+            setIcon (juce::ImageCache::getFromMemory (BinaryData::icon_256_png, BinaryData::icon_256_pngSize));
             auto* mc = new MainComponent (props);
             mc->onTitleChanged = [this] (const juce::String& t) { setName (t); };
             setContentOwned (mc, true);

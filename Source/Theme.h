@@ -32,6 +32,7 @@ namespace Theme
     const juce::Colour loop         { 0xff9b51e0 };
 
     juce::Colour markerColour (int index);
+    constexpr int numMarkerColours = 12;
     juce::Colour bandColour (int index);
     juce::Font font (float height, bool bold = false);
     float textWidth (const juce::Font& f, const juce::String& text);
@@ -93,6 +94,11 @@ public:
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool, bool) override;
     juce::Font getLabelFont (juce::Label&) override;
 };
+
+//==============================================================================
+// Shows a colour picker (palette swatches + free colour) in a call-out box.
+// onChange is called live while the colour changes.
+void showColourPicker (juce::Rectangle<int> screenArea, juce::Colour initial, std::function<void (juce::Colour)> onChange);
 
 //==============================================================================
 // iOS style on/off switch.

@@ -1,38 +1,25 @@
 #include "HeaderBar.h"
+#include <BinaryData.h>
 
 //==============================================================================
 static void drawLogo (juce::Graphics& g, juce::Rectangle<float> area)
 {
-    // Stylised gradient "A" with a waveform, followed by the product name.
-    auto iconArea = area.removeFromLeft (area.getHeight()).reduced (2.0f);
-    auto s = iconArea.getHeight() / 24.0f;
-    auto x0 = iconArea.getX(), y0 = iconArea.getY();
-    auto pt = [&] (float x, float y) { return juce::Point<float> (x0 + x * s, y0 + y * s); };
+    // The Artilody logo mark followed by the product name.
+    static const juce::Image mark = juce::ImageCache::getFromMemory (BinaryData::logo_mark_png, BinaryData::logo_mark_pngSize);
 
-    juce::ColourGradient grad (juce::Colour (0xffff8c28), pt (2, 20).x, pt (2, 20).y,
-                               juce::Colour (0xff00c8e6), pt (22, 4).x, pt (22, 4).y, false);
-    grad.addColour (0.45, juce::Colour (0xffd63ca0));
-    grad.addColour (0.75, juce::Colour (0xff7c4dff));
-    g.setGradientFill (grad);
+    auto markH = area.getHeight();
+    auto markW = mark.isValid() ? markH * (float) mark.getWidth() / (float) mark.getHeight() : markH;
+    auto markArea = area.removeFromLeft (markW);
+    if (mark.isValid())
+        g.drawImage (mark, markArea, juce::RectanglePlacement::centred);
 
-    juce::Path a;
-    a.startNewSubPath (pt (3.5f, 21));
-    a.lineTo (pt (12, 2.5f));
-    a.lineTo (pt (20.5f, 21));
-    g.strokePath (a, juce::PathStrokeType (2.6f * s, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    const float h[] = { 1.5f, 3.5f, 5.5f, 3.0f, 6.0f, 4.0f, 2.0f };
-    for (int i = 0; i < 7; ++i)
-    {
-        auto x = 7.6f + (float) i * 1.45f;
-        g.fillRoundedRectangle (juce::Rectangle<float> (pt (x - 0.45f, 14.5f - h[i] * 0.5f), pt (x + 0.45f, 14.5f + h[i] * 0.5f)), 0.4f * s);
-    }
-
-    area.removeFromLeft (10.0f);
+    area.removeFromLeft (8.0f);
     // shrink the font until the full name fits
     float fh = area.getHeight() * 0.62f;
     while (fh > 10.0f && Theme::textWidth (Theme::font (fh, true), "Artilody ") + Theme::textWidth (Theme::font (fh), "Soundsculp") > area.getWidth())
         fh -= 0.5f;
-    g.setColour (Theme::text);
+    const juce::Colour navy (0xff14233f);
+    g.setColour (navy);
     g.setFont (Theme::font (fh, true));
     g.drawText ("Artilody", area, juce::Justification::centredLeft);
     auto w = Theme::textWidth (Theme::font (fh, true), "Artilody ");
@@ -62,7 +49,7 @@ HeaderBar::HeaderBar()
     trackBox.setTextWhenNothingSelected (T ("No tracks", "Ingen spor"));
     addAndMakeVisible (trackBox);
 
-    for (auto* b : { &undoButton, &redoButton, &zoomOutButton, &zoomInButton, &addButton, &settingsButton })
+    for (auto* b : { &undoButton, &redoButton, &zoomOutButton, &zoomInButton, &tracksButton, &settingsButton })
     {
         b->setColours (Theme::panel, Theme::text);
         addAndMakeVisible (b);
@@ -71,8 +58,12 @@ HeaderBar::HeaderBar()
     redoButton.setTooltip (T ("Redo (Ctrl+Y)", "Gentag (Ctrl+Y)"));
     zoomOutButton.setTooltip (T ("Zoom out (-)", "Zoom ud (-)"));
     zoomInButton.setTooltip (T ("Zoom in (+)", "Zoom ind (+)"));
-    addButton.setTooltip (T ("Tracks: new empty track, open files, insert file, merge...",
-                             "Spor: nyt tomt spor, åbn filer, indsæt fil, flet..."));
+    tracksButton.setTooltip (T ("Tracks: new empty track, insert file, duplicate, merge, close...",
+                                "Spor: nyt tomt spor, indsæt fil, duplikér, flet, luk..."));
+    openButton.setColours (Theme::accent, juce::Colours::white);
+    openButton.setTooltip (T ("Open one or more audio files (Ctrl+O). You can also drag files into the window.",
+                              "Åbn en eller flere lydfiler (Ctrl+O). Du kan også trække filer ind i vinduet."));
+    addAndMakeVisible (openButton);
     settingsButton.setTooltip (T ("Settings", "Indstillinger"));
 
     zoomSlider.setSliderStyle (juce::Slider::LinearHorizontal);
@@ -134,7 +125,7 @@ void HeaderBar::resized()
     const int btn = h - 16;
     const bool narrow = getWidth() < 1500;
 
-    logoArea = r.removeFromLeft (narrow ? 220 : 290).withSizeKeepingCentre (narrow ? 220 : 290, juce::jmin (h, 46));
+    logoArea = r.removeFromLeft (narrow ? 200 : 270).withSizeKeepingCentre (narrow ? 200 : 270, juce::jmin (h, 46));
     r.removeFromLeft (8);
 
     transportGroup = r.removeFromLeft (5 * (btn + 6) + 10);
@@ -155,15 +146,13 @@ void HeaderBar::resized()
     infoArea = r.removeFromRight (narrow ? 220 : 260);
     r.removeFromRight (10);
 
-    zoomGroup = r.removeFromRight (narrow ? 2 * btn + 120 : 3 * btn + 140);
+    zoomGroup = r.removeFromRight (narrow ? 2 * btn + 90 : 2 * btn + 130);
     {
         auto z = zoomGroup.reduced (8, 8);
         zoomOutButton.setBounds (z.removeFromLeft (btn));
         z.removeFromLeft (4);
         zoomInButton.setBounds (z.removeFromLeft (btn));
         z.removeFromLeft (6);
-        addButton.setVisible (! narrow);
-        if (! narrow) addButton.setBounds (z.removeFromRight (btn));
         zoomSlider.setBounds (z.reduced (4, 0));
     }
     r.removeFromRight (10);
@@ -176,7 +165,14 @@ void HeaderBar::resized()
         redoButton.setBounds (e.removeFromLeft (btn));
     }
     r.removeFromRight (10);
-    trackBox.setBounds (r.withSizeKeepingCentre (r.getWidth(), btn + 6));
+    {
+        auto t = r.withSizeKeepingCentre (r.getWidth(), btn + 6);
+        openButton.setBounds (t.removeFromLeft (openButton.getIdealWidth (t.getHeight())));
+        t.removeFromLeft (8);
+        tracksButton.setBounds (t.removeFromRight (t.getHeight()));
+        t.removeFromRight (6);
+        trackBox.setBounds (t);
+    }
 }
 
 //==============================================================================
@@ -190,6 +186,8 @@ ToolBar::ToolBar()
         { "cut",       "cut",       T ("Cut", "Klip"),             T ("Cut selection (Ctrl+X)", "Klip markering (Ctrl+X)"), false, false },
         { "copy",      "copy",      T ("Copy", "Kopiér"),          T ("Copy selection (Ctrl+C)", "Kopiér markering (Ctrl+C)"), false, false },
         { "paste",     "paste",     T ("Paste", "Indsæt"),         T ("Paste at cursor / replace selection (Ctrl+V)", "Indsæt ved positionen / erstat markering (Ctrl+V)"), false, false },
+        { "split",     "split",     T ("Split", "Del"),            T ("Split the clip at the cursor or at the selection edges (Ctrl+I)", "Del klippet ved positionen eller ved markeringens kanter (Ctrl+I)"), false, false },
+        { "join",      "join",      T ("Join", "Saml"),            T ("Join the clips in the selection into one clip (Ctrl+J)", "Saml klippene i markeringen til ét klip (Ctrl+J)"), false, false },
         { "fadein",    "fadein",    T ("Fade In", "Fade ind"),     T ("Fade in the selection", "Fade markeringen ind"), false, false },
         { "fadeout",   "fadeout",   T ("Fade Out", "Fade ud"),     T ("Fade out the selection", "Fade markeringen ud"), false, false },
         { "normalize", "normalize", T ("Normalize", "Normalisér"), T ("Normalize to -0.1 dB peak", "Normalisér til -0,1 dB peak"), false, false },
@@ -242,7 +240,7 @@ void ToolBar::resized()
         return total + 30;
     };
     for (auto& e : entries) e.button->setShowText (! iconOnlyAlways (e.id));
-    const char* dropOrder[] = { "noise", "eq", "select", "volume", "looptool", "pitch", "reverse", "trim" };
+    const char* dropOrder[] = { "noise", "eq", "select", "volume", "looptool", "pitch", "reverse", "trim", "silence", "normalize", "fadein", "fadeout" };
     for (auto* id : dropOrder)
     {
         if (measure() <= r.getWidth()) break;
@@ -262,7 +260,7 @@ void ToolBar::resized()
         if (! e.rightAligned)
         {
             e.button->setBounds (r.removeFromLeft (e.button->getIdealWidth (h)));
-            r.removeFromLeft (e.id == "volume" || e.id == "paste" ? 18 : 8);
+            r.removeFromLeft (e.id == "volume" || e.id == "join" ? 18 : 8);
         }
 }
 
@@ -285,10 +283,6 @@ StatusBar::StatusBar()
         zoomBox.addItem (juce::String (p) + "%", p);
     addAndMakeVisible (zoomBox);
 
-    mixToggle.setButtonText (T ("Play all tracks", "Afspil alle spor"));
-    mixToggle.setTooltip (T ("Play all tracks mixed together instead of only the current track",
-                             "Afspil alle spor mixet sammen i stedet for kun det aktuelle spor"));
-    addAndMakeVisible (mixToggle);
 }
 
 void StatusBar::setInfo (const juce::String& f, const juce::String& c, const juce::String& s, const juce::String& sl,
@@ -312,7 +306,6 @@ void StatusBar::paint (juce::Graphics& g)
     g.setColour (Theme::text);
     g.drawText (formatText, r.removeFromLeft (230), juce::Justification::centredLeft);
 
-    r.removeFromLeft (160);   // mix toggle lives here
     auto mid = r.withTrimmedRight (330);
     g.setColour (Theme::textDim);
     juce::String txt;
@@ -342,7 +335,6 @@ void StatusBar::paint (juce::Graphics& g)
 void StatusBar::resized()
 {
     auto r = getLocalBounds().reduced (16, 6);
-    mixToggle.setBounds (r.getX() + 230, r.getY(), 150, r.getHeight());
     zoomBox.setBounds (r.removeFromRight (90));
     r.removeFromRight (8);
     zoomInButton.setBounds (r.removeFromRight (r.getHeight()));

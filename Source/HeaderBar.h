@@ -19,7 +19,9 @@ public:
 
     juce::ComboBox trackBox;
     IconButton undoButton { "undo" }, redoButton { "redo" };
-    IconButton zoomOutButton { "zoomout" }, zoomInButton { "zoomin" }, addButton { "plus" };
+    IconButton zoomOutButton { "zoomout" }, zoomInButton { "zoomin" };
+    IconButton openButton { "open", T ("Open file", "Åbn fil") };
+    IconButton tracksButton { "plus" };
     juce::Slider zoomSlider;
     IconButton exportButton { "export", T ("Export", "Eksport") };
     IconButton settingsButton { "settings" };
@@ -59,7 +61,6 @@ public:
     juce::Slider zoomSlider;
     juce::ComboBox zoomBox;
     IconButton zoomOutButton { "zoomout" }, zoomInButton { "zoomin" };
-    juce::ToggleButton mixToggle;
 
 private:
     juce::String formatText, cursorText, selectionText, selLengthText, messageText;

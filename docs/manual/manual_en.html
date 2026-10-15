@@ -11,7 +11,7 @@
   <img class="logo" src="../../Resources/icon_256.png" alt="Logo">
   <h1>Artilody Soundsculp</h1>
   <div class="sub">User Manual – English</div>
-  <div class="ver">Version 1.0.0</div>
+  <div class="ver">Version 1.1.0</div>
 </div>
 
 <h2>Contents</h2>
@@ -19,227 +19,231 @@
   <li>Introduction</li>
   <li>Installation</li>
   <li>The main window</li>
-  <li>Tracks: open, create, insert and merge</li>
+  <li>Tracks: open, create and merge</li>
+  <li>Clips – audio in pieces</li>
   <li>Selecting with the mouse</li>
   <li>Editing</li>
   <li>Pitch</li>
   <li>Parametric EQ</li>
   <li>Noise Remover</li>
   <li>The volume line</li>
-  <li>Text markers</li>
-  <li>Playback and recording</li>
+  <li>Markers</li>
+  <li>Playback, recording, mute and solo</li>
+  <li>Zoom and track height</li>
   <li>Export</li>
-  <li>Undo, zoom and settings</li>
+  <li>Undo and settings</li>
   <li>Keyboard shortcuts</li>
   <li>Troubleshooting</li>
 </ol>
 
 <h2>1. Introduction</h2>
-<p>Artilody Soundsculp is a simple audio editor. You can open several audio files at once (each file becomes a <b>track</b>),
-create empty tracks, cut and copy audio between tracks, improve the sound with effects and finally export a single track
-or all tracks mixed into one file.</p>
-<p>Features: mouse selection, trim, cut/copy/paste, fade in and out, normalize, silence trim, loop, reverse,
-pitch shifting without changing the speed, a parametric EQ, a noise remover, a volume line on every track, text markers,
-recording from a microphone, and export to WAV, FLAC, MP3, OGG, AIFF, M4A and Opus.</p>
+<p>Artilody Soundsculp is a program for editing and combining several audio tracks. Every audio file you open becomes a <b>track</b>.
+All tracks are shown below each other on a shared timeline and play together. The audio on a track lives in <b>clips</b>,
+which can be split, moved around – also to other tracks – and joined again, much like in Audacity.</p>
+<p>Features: trim, cut/copy/paste, split and join clips, fade in and out, normalize, silence trim, loop, reverse,
+pitch shifting without changing the speed, a parametric EQ, a noise remover, a volume line on every track, coloured markers,
+recording from a microphone, merging tracks, and export to WAV, AIFF, FLAC, OGG, MP3, M4A and Opus.</p>
+<p>The program is in English. A Danish interface can be chosen under <b>Settings (gear) → Language</b> (requires a restart).</p>
 <p>Every change can be undone. The original file is never modified – the result is only written when you export.</p>
 
 <h2>2. Installation</h2>
-<p>Download the installer from the <b>Releases</b> page at
-<code>github.com/shenphenchoedron-hue/Artilody-Soundsculp</code>.</p>
+<p>Download the installer from the <b>Releases</b> page at <code>github.com/shenphenchoedron-hue/Artilody-Soundsculp</code>.</p>
 <h3>Windows (10 and 11)</h3>
 <ol>
-  <li>Download <code>ArtilodySoundsculp-1.0.0-Windows-Setup.exe</code>.</li>
-  <li>Double-click it. If Windows SmartScreen shows "Windows protected your PC", click <b>More info</b> and then <b>Run anyway</b>.</li>
-  <li>Follow the wizard. The program and the manuals are then available in the Start menu.</li>
+  <li>Download <code>ArtilodySoundsculp-1.1.0-Windows-Setup.exe</code> and double-click it.</li>
+  <li>If Windows SmartScreen shows "Windows protected your PC", click <b>More info</b> → <b>Run anyway</b>.</li>
+  <li>Follow the wizard. The program and the manuals are then in the Start menu.</li>
 </ol>
 <p>A <i>Portable</i> zip is also available – unpack it and run the program without installing.</p>
 <h3>macOS (11 or newer, Intel and Apple Silicon)</h3>
 <ol>
-  <li>Download <code>ArtilodySoundsculp-1.0.0-macOS-Universal.dmg</code> and open it.</li>
-  <li>Drag <b>Artilody Soundsculp</b> into the <b>Applications</b> folder.</li>
-  <li>The first time: right-click (or ctrl-click) the app, choose <b>Open</b> and confirm with <b>Open</b>. The app is not notarised by Apple, so macOS asks once.
-  If that does not help, open Terminal and type: <code>xattr -cr "/Applications/Artilody Soundsculp.app"</code></li>
+  <li>Download <code>ArtilodySoundsculp-1.1.0-macOS-Universal.dmg</code>, open it and drag the program to <b>Applications</b>.</li>
+  <li>The first time: right-click the app, choose <b>Open</b> and confirm. If that does not help, type in Terminal:
+      <code>xattr -cr "/Applications/Artilody Soundsculp.app"</code></li>
   <li>The first time you record, macOS asks for microphone access – answer <b>OK</b>.</li>
 </ol>
 <h3>Debian (12+) and Ubuntu (22.04 / 24.04)</h3>
-<p>Download the <code>.deb</code> file for your system (<code>debian-12</code> or <code>ubuntu-22.04-24.04</code>) and install it with:</p>
-<p><code>sudo apt install ./artilody-soundsculp_1.0.0_debian-12_amd64.deb</code></p>
-<p>The program then appears in the application menu under <b>Sound &amp; Video</b>, or start it with the command <code>artilody-soundsculp</code>.
-The package recommends <code>ffmpeg</code>, which is used for MP3, M4A and Opus export. If it was not installed automatically: <code>sudo apt install ffmpeg</code>.</p>
-<p>Uninstall with <code>sudo apt remove artilody-soundsculp</code>.</p>
+<p>Download the <code>.deb</code> file for your system and install it, for example:</p>
+<p><code>sudo apt install ./artilody-soundsculp_1.1.0_debian-12_amd64.deb</code></p>
+<p>The program is in the application menu under <b>Sound &amp; Video</b>, or start it with <code>artilody-soundsculp</code>.
+MP3, M4A and Opus export use <code>ffmpeg</code>: <code>sudo apt install ffmpeg</code>. Uninstall with <code>sudo apt remove artilody-soundsculp</code>.</p>
 
 <div class="page-break"></div>
 <h2>3. The main window</h2>
 <img class="shot" src="../images/screenshot_en.png" alt="Screenshot">
 <table>
   <tr><th>Area</th><th>Description</th></tr>
-  <tr><td>Top bar</td><td>Logo, transport buttons (record, go to start, play, stop, loop), track selector, undo/redo, zoom,
-      <b>+</b> (tracks menu), selection and length display, <b>Export</b> and settings (gear).</td></tr>
-  <tr><td>Toolbar</td><td>Select, Volume, Trim, Cut, Copy, Paste, Fade In, Fade Out, Normalize, Silence Trim, Loop, Reverse, Pitch.
-      On the right: buttons that show/hide the EQ and the Noise Remover.</td></tr>
-  <tr><td>Tracks (left)</td><td>All open tracks. Click to select, <b>×</b> closes the track, <b>+</b> opens the tracks menu. An asterisk (*) means changes that are not exported yet.</td></tr>
-  <tr><td>File (left)</td><td>Name, format, sample rate, bit depth, channels, length and file size of the selected track.</td></tr>
-  <tr><td>Markers (left)</td><td>The list of text markers. This is where you type the text of each marker.</td></tr>
-  <tr><td>Waveform (centre)</td><td>Time ruler at the top, the channels (L/R), the orange volume line and the <b>marker line</b> at the bottom.
-      Below it is the overview of the whole track.</td></tr>
-  <tr><td>EQ and Noise Remover (right)</td><td>Parametric 4-band EQ and noise remover with spectrum display.</td></tr>
-  <tr><td>Status bar</td><td>Format, <b>Play all tracks</b>, cursor position, selection, messages and zoom.</td></tr>
+  <tr><td>Top bar</td><td>Logo, transport buttons (record, go to start, play, stop, loop), <b>Open file</b>, track selector,
+      <b>+</b> (tracks menu), undo/redo, zoom, selection and length, <b>Export</b> and <b>Settings</b> (gear).</td></tr>
+  <tr><td>Toolbar</td><td>Select, Volume, Trim, Cut, Copy, Paste, Split, Join, Fade In, Fade Out, Normalize, Silence Trim, Loop, Reverse, Pitch.
+      On the right: show/hide the EQ and the Noise Remover.</td></tr>
+  <tr><td>Tracks (left)</td><td>The list of tracks with the buttons <b>Open</b>, <b>Merge</b> and <b>+</b>.</td></tr>
+  <tr><td>File (left)</td><td>Information about the selected track.</td></tr>
+  <tr><td>Markers (left)</td><td>The markers of the selected track. This is where you type their text and choose colours.</td></tr>
+  <tr><td>Tracks area (centre)</td><td>Zoom bar, shared time ruler and all tracks below each other. Each track has a header
+      (number, name, M, S, ×), clips with a name bar, an orange volume line and a marker line at the bottom.</td></tr>
+  <tr><td>EQ and Noise Remover (right)</td><td>Parametric EQ and noise remover.</td></tr>
+  <tr><td>Status bar</td><td>Format, cursor position, selection, messages and zoom.</td></tr>
 </table>
 
-<h2>4. Tracks: open, create, insert and merge</h2>
+<h2>4. Tracks: open, create and merge</h2>
 <h3>Opening audio files</h3>
-<p>Click <b>+</b> (in the top bar or the Tracks panel) and choose <b>Open audio files…</b> (<kbd>Ctrl+O</kbd>). You can select several files at once,
-or drag files into the window. Each file opens as a new track.</p>
-<p>Supported formats: WAV, AIFF, FLAC, OGG, MP3 – and with ffmpeg also M4A/AAC, Opus, WMA and more.</p>
-<h3>New empty track</h3>
-<p>Choose <b>+ → New empty track</b> (<kbd>Ctrl+N</kbd>). An empty track shows 30 seconds so you can click a position. Then you can:</p>
+<p>Click <b>Open file</b> in the top bar or <b>Open</b> above the track list (<kbd>Ctrl+O</kbd>). You can select several files at once
+or drag files into the window. Each file becomes a new track at the bottom. Formats: WAV, AIFF, FLAC, OGG, MP3 – and with ffmpeg also M4A, Opus and more.</p>
+<h3>Selecting a track</h3>
+<p>Click a track to select it (its header turns blue). Editing, effects and markers work on the selected track.
+Double-click the header to rename the track, click <b>×</b> to close it.</p>
+<h3>New empty track and inserting audio</h3>
+<p><b>+ → New empty track</b> (<kbd>Ctrl+N</kbd>) creates an empty track. Click a position on it and:</p>
 <ul>
-  <li><b>Insert an audio file</b>: <b>+ → Insert audio file at cursor…</b>. The file is inserted where you clicked.</li>
-  <li><b>Copy a piece from another track</b>: select the other track, select an area, press <b>Copy</b> (<kbd>Ctrl+C</kbd>),
-      select the empty track, click the position and press <b>Paste</b> (<kbd>Ctrl+V</kbd>).</li>
+  <li>insert an audio file with <b>+ → Insert audio file at cursor…</b>, or</li>
+  <li>copy a piece from another track (<kbd>Ctrl+C</kbd>), click the position and paste (<kbd>Ctrl+V</kbd>), or</li>
+  <li>drag a clip from another track onto it (see section 5).</li>
 </ul>
-<p>If you click after the end of the audio, the gap is filled with silence automatically. Different sample rates or channel counts are converted automatically.</p>
-<h3>Merging tracks into one track</h3>
-<p>Choose <b>+ → Merge tracks into one track…</b>. Tick the tracks to include and press <b>Merge</b>. The tracks are mixed together
-(all starting at 0:00) into a new track called "Merged track". Volume lines are included and markers are copied.
-If the mix gets too loud, the level is reduced automatically to avoid clipping. Optionally tick <i>Close the merged tracks afterwards</i>.</p>
-<div class="tip">If you just want all tracks in one file, use <b>Export → All tracks mixed into one file</b> (see section 13).
-Turn on <b>Play all tracks</b> in the status bar to hear the mix first.</div>
-<h3>Other track functions</h3>
-<p>The tracks menu also has <b>Duplicate track</b>, <b>Rename track…</b> and <b>Close track</b>.</p>
+<p>Different sample rates or channel counts are converted automatically.</p>
+<h3>Merging tracks into a new track</h3>
+<p>Click <b>Merge</b> above the track list (or <b>+ → Merge tracks into one track…</b>). Tick the tracks to include and press <b>Merge</b>.
+The tracks are mixed into a new track called "Merged track". <b>Volume lines are included</b> and become part of the audio, so the new track
+starts with a flat volume line. Markers are copied. If the mix gets too loud, the level is reduced automatically.
+Optionally tick <i>Close the merged tracks afterwards</i>.</p>
 
-<h2>5. Selecting with the mouse</h2>
+<h2>5. Clips – audio in pieces</h2>
+<p>The audio on a track lives in <b>clips</b>. Each clip has a dark-blue <b>name bar</b> at the top. Between clips there can be
+empty gaps (darker area), which play as silence.</p>
 <ul>
-  <li><b>Drag</b> in the waveform to select. The selection turns purple.</li>
-  <li>Drag the white handles at the edges to adjust start and end. <kbd>Shift</kbd>+click extends the selection.</li>
-  <li>A single click removes the selection and sets the cursor (the white line).</li>
-  <li><b>Double-click</b> selects the part between two markers – for example a whole verse.</li>
-  <li><kbd>Ctrl+A</kbd> selects the whole track. Click in the time ruler to move the cursor.</li>
+  <li><b>Cut</b> (<kbd>Ctrl+X</kbd>) and <b>Delete</b> remove the selection and <b>leave a gap</b> – the track does not close up.</li>
+  <li><b>Delete and close gap</b> (<kbd>Shift+Delete</kbd>) removes the selection and closes the gap.</li>
+  <li><b>Split</b> (<kbd>Ctrl+I</kbd>) splits the clip at the cursor – or at the selection edges.</li>
+  <li><b>Join</b> (<kbd>Ctrl+J</kbd>) joins the clips in the selection into one clip; gaps become silence.</li>
+  <li><b>Move a clip</b>: drag its name bar left or right. Clips cannot overlap – if you drop a clip onto another, it snaps next to it.</li>
+  <li><b>Move a clip to another track</b>: drag the name bar up or down. The track you drop on lights up green.</li>
+  <li>Click the name bar to select the whole clip.</li>
+  <li><b>Right-click</b> in the audio for a menu with Cut, Copy, Paste, Delete, Delete and close gap, Split here, Join clips, Select clip and Rename clip.</li>
 </ul>
-<p>Start, end and length are shown in the top bar and the status bar.</p>
+<p><b>Paste</b> (<kbd>Ctrl+V</kbd>) inserts a new clip at the cursor. If the cursor is inside a clip, the clip is split and the rest is pushed to the right.
+In a gap, later audio is only pushed if there is not enough room. If there is a selection, it is replaced.</p>
 
-<h2>6. Editing</h2>
-<p>Most effects work on the selection. With nothing selected they work on the whole track.</p>
+<h2>6. Selecting with the mouse</h2>
+<ul>
+  <li><b>Drag</b> in the audio to select (turns purple). Drag the white handles to adjust. <kbd>Shift</kbd>+click extends.</li>
+  <li>A single click sets the cursor (white line) – also after the end of the audio or in a gap.</li>
+  <li><b>Double-click</b> selects the part between two markers. <kbd>Ctrl+A</kbd> selects the whole track.</li>
+  <li>Click in the time ruler to move the cursor.</li>
+</ul>
+
+<h2>7. Editing</h2>
+<p>Effects work on the selection – or on the whole track if nothing is selected. They work on all clips inside the selection.</p>
 <table>
   <tr><th>Button</th><th>Function</th></tr>
-  <tr><td><b>Trim</b> (<kbd>Ctrl+T</kbd>)</td><td>Keeps only the selection and removes the rest.</td></tr>
-  <tr><td><b>Cut</b> (<kbd>Ctrl+X</kbd>)</td><td>Removes the selection and puts it on the clipboard.</td></tr>
-  <tr><td><b>Copy</b> (<kbd>Ctrl+C</kbd>)</td><td>Copies the selection to the clipboard.</td></tr>
-  <tr><td><b>Paste</b> (<kbd>Ctrl+V</kbd>)</td><td>Inserts at the cursor or replaces the selection. Also works between tracks.</td></tr>
-  <tr><td><kbd>Delete</kbd></td><td>Deletes the selection.</td></tr>
-  <tr><td><b>Fade In / Fade Out</b></td><td>Smoothly fades the selection in/out. Without a selection the first/last 3 seconds are used.</td></tr>
-  <tr><td><b>Normalize</b></td><td>Raises (or lowers) the level so the loudest peak is at −0.1 dB.</td></tr>
-  <tr><td><b>Silence Trim</b></td><td>Removes silence at the start and end. You enter the threshold in dB (default −50 dB).</td></tr>
-  <tr><td><b>Loop</b></td><td>Repeats the selection a chosen number of times (with tiny crossfades to avoid clicks).</td></tr>
-  <tr><td><b>Reverse</b></td><td>Reverses the selection.</td></tr>
-  <tr><td><b>Pitch</b></td><td>Raises or lowers the pitch without changing the speed (see section 7).</td></tr>
+  <tr><td><b>Trim</b> (<kbd>Ctrl+T</kbd>)</td><td>Keeps only the selection. It stays where it is (like Audacity).</td></tr>
+  <tr><td><b>Cut / Copy / Paste</b></td><td>Cut (leaves a gap), copy, paste as a new clip. Also works between tracks.</td></tr>
+  <tr><td><b>Split / Join</b></td><td>Split and join clips (see section 5).</td></tr>
+  <tr><td><b>Fade In / Fade Out</b></td><td>Smooth fade over the selection (without a selection: the first/last 3 seconds). Follows time, so it is smooth across several clips.</td></tr>
+  <tr><td><b>Normalize</b></td><td>Raises/lowers the level so the loudest peak is at −0.1 dB.</td></tr>
+  <tr><td><b>Silence Trim</b></td><td>Removes silence at the start and end of each clip. Threshold in dB (default −50).</td></tr>
+  <tr><td><b>Loop</b></td><td>Repeats the selection a number of times; later audio is pushed to the right.</td></tr>
+  <tr><td><b>Reverse</b></td><td>Reverses the audio.</td></tr>
+  <tr><td><b>Pitch</b></td><td>Changes the pitch without changing the speed (section 8).</td></tr>
 </table>
 
-<h2>7. Pitch</h2>
-<p>Click <b>Pitch</b>. Choose between −12 and +12 semitones (in steps of 0.1). The −12, −1, +1, +12 buttons give quick choices.
-Press <b>Preview</b> to listen (up to 10 seconds) and <b>Apply</b> to keep the change. Length and tempo are preserved.</p>
+<h2>8. Pitch</h2>
+<p>Click <b>Pitch</b> and choose between −12 and +12 semitones. <b>Preview</b> listens (up to 10 s), <b>Apply</b> keeps the change. Length and tempo are preserved.</p>
 
-<h2>8. Parametric EQ</h2>
-<p>The EQ has 4 bands. Each band has a <b>type</b> (Low Shelf, Bell, High Shelf, Low Cut, High Cut, Notch),
-<b>frequency</b>, <b>gain</b> (dB), <b>Q</b> (width) and an on/off button.</p>
+<h2>9. Parametric EQ</h2>
+<p>4 bands with type (Low Shelf, Bell, High Shelf, Low Cut, High Cut, Notch), frequency, gain, Q and on/off.</p>
 <ul>
-  <li>Drag the coloured points in the curve: horizontal = frequency, vertical = gain. The mouse wheel over a point changes Q. Double-click resets the gain.</li>
-  <li>Values can also be changed by dragging the fields, or double-clicking and typing a value.</li>
-  <li>The drop-down at the top has presets (Bass boost, Vocal presence, Warmth, Remove rumble, Telephone …).</li>
+  <li>Drag the coloured points in the curve (horizontal = frequency, vertical = gain). The mouse wheel changes Q, double-click resets.</li>
+  <li>The drop-down has presets (Bass boost, Vocal presence, Warmth, Remove rumble, Telephone …).</li>
   <li>The switch at the top right lets you <b>hear the EQ live</b> during playback.</li>
-  <li><b>Apply</b> applies the EQ permanently to the selection (or the whole track). Then turn the switch off so you do not hear it twice.</li>
+  <li><b>Apply</b> applies the EQ permanently to the selection or track. Then turn the switch off.</li>
 </ul>
 
-<h2>9. Noise Remover</h2>
-<p>The noise remover reduces constant background noise (hiss, hum, fans).</p>
+<h2>10. Noise Remover</h2>
 <ol>
-  <li>For the best result: select a part containing <b>only noise</b> and choose <b>… → Learn noise profile from selection</b>. The switch turns on.
-      Without a learned profile the noise is estimated automatically.</li>
+  <li>Select a part with <b>only noise</b> and choose <b>… → Learn noise profile from selection</b> (otherwise the noise is estimated automatically).</li>
   <li>Select what to clean (or nothing for the whole track).</li>
-  <li>Adjust <b>Reduction</b> (how much the noise is reduced), <b>Sensitivity</b> (how much is treated as noise) and
-      <b>Artifact Control</b> (smoothing against "watery" sound).</li>
-  <li>The spectrum shows the original (grey) and the filtered result (cyan). Press <b>Preview</b> to listen (up to 15 s). The headphones button lets you hear <i>only the noise being removed</i>.</li>
-  <li>Press <b>Apply</b>.</li>
+  <li>Adjust <b>Reduction</b>, <b>Sensitivity</b> and <b>Artifact Control</b>. The spectrum shows original (grey) and filtered (cyan).</li>
+  <li><b>Preview</b> listens (up to 15 s); the headphones button lets you hear only the noise being removed. Press <b>Apply</b>.</li>
 </ol>
 
-<h2>10. The volume line</h2>
+<h2>11. The volume line</h2>
 <p>Each track has an orange volume line that controls the level over time without changing the audio itself. It is used for playback, merging and export.</p>
 <ul>
-  <li>Choose the <b>Volume</b> tool and click on the waveform to add points. Drag points up and down (and sideways).
-      The middle is 0 dB (unchanged), the top is +6 dB and the bottom is silence. The value is shown while dragging.</li>
-  <li>With the <b>Select</b> tool you can still drag existing points, and double-click the line to add new ones.</li>
+  <li>Choose the <b>Volume</b> tool and click to add points; drag them up and down. The middle is 0 dB, the top +6 dB, the bottom silence.</li>
+  <li>With <b>Select</b> you can drag existing points and double-click the line to add new ones.</li>
   <li>Right-click a point to delete it. <b>File panel → … → Reset volume line</b> removes all points.</li>
+  <li>The volume line belongs to the track timeline – if you move a clip, the line stays where it is.</li>
 </ul>
 
-<h2>11. Text markers</h2>
-<p>Markers show, for example, where a verse or chorus starts.</p>
+<h2>12. Markers</h2>
+<p>Each track has its own markers with its own numbering (marker 1 on one track has nothing to do with marker 1 on another).</p>
 <ul>
-  <li>Click on the <b>marker line</b> below the waveform to add a marker. The text field in the <b>Markers</b> panel on the left becomes active –
-      type the text (e.g. "Verse 1") and press <kbd>Enter</kbd>.</li>
-  <li>The marker is shown as a coloured label on the marker line, a triangle on the time ruler and a thin line through the waveform.</li>
-  <li>Drag a marker to move it. Right-click to rename, select to the next marker or delete.</li>
-  <li><b>+</b> in the Markers panel (or the <kbd>M</kbd> key) adds a marker at the cursor – also during playback.</li>
-  <li>Click a marker in the list to jump to it. <b>×</b> deletes the marker.</li>
+  <li>Click on the <b>marker line</b> below a track to add a marker. Type its text in the <b>Markers</b> panel on the left and press <kbd>Enter</kbd>.
+      The panel shows which track the markers belong to.</li>
+  <li>Below the track only the marker <b>number</b> is shown; the text is in the panel and appears when you hover over the marker.</li>
+  <li><b>Colour</b>: click the coloured triangle in the Markers panel – or right-click the marker and choose <b>Change colour…</b>.
+      Pick one of the 12 preset colours or any other colour.</li>
+  <li>Drag a marker to move it. Right-click to rename, change colour, select to the next marker or delete.</li>
+  <li><b>+</b> in the panel (or <kbd>M</kbd>) adds a marker at the cursor – also during playback.</li>
 </ul>
 
-<h2>12. Playback and recording</h2>
+<h2>13. Playback, recording, mute and solo</h2>
 <table>
   <tr><th>Button</th><th>Function</th></tr>
-  <tr><td><span class="btn rec">●</span> Record (<kbd>R</kbd>)</td><td>Starts recording on a new track. The button lights up red while recording. Press it again or Stop to finish.</td></tr>
+  <tr><td><span class="btn rec">●</span> Record (<kbd>R</kbd>)</td><td>Records onto a new track. Lights up red while recording. Press again or Stop to finish.</td></tr>
   <tr><td><span class="btn home">|◀</span> Go to start (<kbd>Home</kbd>)</td><td>Moves the cursor to the start.</td></tr>
-  <tr><td><span class="btn play">▶</span> Play (<kbd>Space</kbd>)</td><td>Plays from the cursor or the start of the selection. The button lights up green while playing.</td></tr>
+  <tr><td><span class="btn play">▶</span> Play (<kbd>Space</kbd>)</td><td>Plays <b>all tracks together</b> from the cursor. Lights up green.</td></tr>
   <tr><td><span class="btn stop">■</span> Stop</td><td>Stops playback or recording.</td></tr>
-  <tr><td><span class="btn loop">⟳</span> Loop (<kbd>L</kbd>)</td><td>Repeats the selection (or the whole track) during playback.</td></tr>
+  <tr><td><span class="btn loop">⟳</span> Loop (<kbd>L</kbd>)</td><td>Repeats the selection (or everything) during playback.</td></tr>
 </table>
-<p><b>Play all tracks</b> in the status bar plays all tracks mixed together. Audio devices (microphone and speakers) are chosen under
-<b>Settings → Audio settings…</b>.</p>
+<p>Each track header has <b>M</b> (mute – silences the track, which is dimmed) and <b>S</b> (solo – hear only the solo tracks).
+Audio devices are chosen under <b>Settings → Audio settings…</b>.</p>
 
-<h2>13. Export</h2>
-<p>Click <b>Export</b> (<kbd>Ctrl+E</kbd>) and choose what to export:</p>
+<h2>14. Zoom and track height</h2>
 <ul>
-  <li><b>Current track</b> – the whole selected track.</li>
-  <li><b>Selection only</b> – only the selected area.</li>
-  <li><b>All tracks mixed into one file</b> – all tracks combined.</li>
+  <li>The zoom bar above the tracks: <b>Zoom out</b>, <b>Zoom in</b>, <b>Zoom to selection</b> and <b>Show all</b>, plus the zoom percentage.</li>
+  <li>On the right of the bar: <b>Track height</b> – makes the tracks lower or taller.</li>
+  <li>With the mouse: <kbd>Ctrl</kbd>+wheel zooms at the mouse, <kbd>Shift</kbd>+wheel scrolls sideways, <kbd>Alt</kbd>+wheel changes the track height,
+      the wheel alone scrolls up/down through the tracks.</li>
+  <li>The keys <kbd>+</kbd>, <kbd>−</kbd> and <kbd>0</kbd> (show all) and the sliders in the top bar and status bar also work.</li>
 </ul>
-<p>Then choose the format and file name. The volume line is always included.</p>
-<table>
-  <tr><th>Format</th><th>Note</th></tr>
-  <tr><td>WAV 16 / 24 / 32-bit float</td><td>Uncompressed, best quality.</td></tr>
-  <tr><td>AIFF 24-bit</td><td>Uncompressed (popular on Mac).</td></tr>
-  <tr><td>FLAC 16 / 24-bit</td><td>Lossless compression.</td></tr>
-  <tr><td>OGG Vorbis 192 kbps</td><td>Compressed.</td></tr>
-  <tr><td>MP3 320 / 192 kbps</td><td>Compressed – needs ffmpeg*.</td></tr>
-  <tr><td>M4A / AAC 256 kbps, Apple Lossless</td><td>Needs ffmpeg*.</td></tr>
-  <tr><td>Opus 160 kbps</td><td>Needs ffmpeg*.</td></tr>
-</table>
-<p>* ffmpeg is included with the Windows and macOS installers. On Linux install it with <code>sudo apt install ffmpeg</code>.</p>
 
-<h2>14. Undo, zoom and settings</h2>
+<h2>15. Export</h2>
+<img class="shot" style="width:70%" src="../images/export_en.png" alt="Export">
+<p>Click <b>Export</b> (<kbd>Ctrl+E</kbd>). In the window you choose:</p>
+<ul>
+  <li><b>What to export</b>: <i>Current track</i>, <i>Selection only</i> or <i>All tracks mixed</i> (all tracks in one file – muted tracks are left out, solo tracks win).</li>
+  <li><b>Format</b>: Uncompressed (WAV 16/24/32-bit, AIFF), Lossless (FLAC 16/24, Apple Lossless) or Compressed (MP3 320/192, OGG, M4A/AAC, Opus).
+      MP3, M4A and Opus need ffmpeg (included on Windows and macOS).</li>
+  <li><b>File name</b> and <b>Folder</b> (with <b>Choose…</b>). The file extension follows the format automatically.</li>
+</ul>
+<p>The info line shows length, sample rate, stereo/mono and the approximate file size. Volume lines are always included.
+The program remembers the last format and folder. If the file exists, you are asked before it is replaced.</p>
+
+<h2>16. Undo and settings</h2>
 <ul>
   <li><b>Undo/Redo</b>: the arrow buttons or <kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd>. Each track has its own history.</li>
-  <li><b>Zoom</b>: the magnifiers, the slider, <kbd>+</kbd>/<kbd>−</kbd>, <kbd>0</kbd> (whole track) or <kbd>Ctrl</kbd>+mouse wheel. The mouse wheel alone scrolls sideways. Click/drag in the overview to move the view.</li>
-  <li><b>Settings</b> (gear): Audio settings, Language (English/Danish – requires restart), Keyboard shortcuts and About.</li>
+  <li><b>Settings</b> (gear): Audio settings, Language (English/Danish – restart), Keyboard shortcuts and About.</li>
 </ul>
 
-<h2>15. Keyboard shortcuts</h2>
+<h2>17. Keyboard shortcuts</h2>
 <table>
   <tr><th>Key</th><th>Function</th><th>Key</th><th>Function</th></tr>
   <tr><td><kbd>Space</kbd></td><td>Play / stop</td><td><kbd>Ctrl+X/C/V</kbd></td><td>Cut / copy / paste</td></tr>
-  <tr><td><kbd>R</kbd></td><td>Record</td><td><kbd>Delete</kbd></td><td>Delete selection</td></tr>
-  <tr><td><kbd>Home</kbd></td><td>Go to start</td><td><kbd>Ctrl+T</kbd></td><td>Trim</td></tr>
-  <tr><td><kbd>L</kbd></td><td>Loop on/off</td><td><kbd>Ctrl+Z / Ctrl+Y</kbd></td><td>Undo / redo</td></tr>
-  <tr><td><kbd>M</kbd></td><td>New marker</td><td><kbd>Ctrl+O</kbd></td><td>Open files</td></tr>
-  <tr><td><kbd>Ctrl+A</kbd></td><td>Select all</td><td><kbd>Ctrl+N</kbd></td><td>New empty track</td></tr>
-  <tr><td><kbd>+ / − / 0</kbd></td><td>Zoom in / out / fit</td><td><kbd>Ctrl+E</kbd></td><td>Export</td></tr>
+  <tr><td><kbd>R</kbd></td><td>Record</td><td><kbd>Delete</kbd></td><td>Delete (leave gap)</td></tr>
+  <tr><td><kbd>Home</kbd></td><td>Go to start</td><td><kbd>Shift+Delete</kbd></td><td>Delete and close gap</td></tr>
+  <tr><td><kbd>L</kbd></td><td>Loop on/off</td><td><kbd>Ctrl+I / Ctrl+J</kbd></td><td>Split / join clips</td></tr>
+  <tr><td><kbd>M</kbd></td><td>New marker</td><td><kbd>Ctrl+T</kbd></td><td>Trim</td></tr>
+  <tr><td><kbd>Ctrl+A</kbd></td><td>Select all</td><td><kbd>Ctrl+Z / Ctrl+Y</kbd></td><td>Undo / redo</td></tr>
+  <tr><td><kbd>+ / − / 0</kbd></td><td>Zoom in / out / show all</td><td><kbd>Ctrl+O / N / E</kbd></td><td>Open / new track / export</td></tr>
 </table>
 <p>On a Mac use <kbd>Cmd</kbd> instead of <kbd>Ctrl</kbd>.</p>
 
-<h2>16. Troubleshooting</h2>
+<h2>18. Troubleshooting</h2>
 <ul>
-  <li><b>No sound</b>: check the output device under <b>Settings → Audio settings</b>.</li>
-  <li><b>Recording does not work</b>: choose an input device and enable input channels in Audio settings. On macOS allow microphone access under System Settings → Privacy &amp; Security → Microphone.</li>
-  <li><b>MP3/M4A/Opus is greyed out</b>: ffmpeg was not found. Install ffmpeg (Linux: <code>sudo apt install ffmpeg</code>, macOS: <code>brew install ffmpeg</code>).</li>
-  <li><b>A file cannot be opened</b>: the format may require ffmpeg (e.g. M4A on Linux).</li>
+  <li><b>No sound</b>: check the output device under <b>Settings → Audio settings</b>, and that the tracks are not muted (M).</li>
+  <li><b>Recording does not work</b>: choose an input device in Audio settings. On macOS allow microphone access in System Settings → Privacy &amp; Security → Microphone.</li>
+  <li><b>MP3/M4A/Opus is greyed out</b>: ffmpeg is missing (Linux: <code>sudo apt install ffmpeg</code>, macOS: <code>brew install ffmpeg</code>).</li>
   <li><b>macOS says the app is damaged</b>: run <code>xattr -cr "/Applications/Artilody Soundsculp.app"</code> in Terminal.</li>
 </ul>
 <p>Report bugs and wishes on GitHub under <b>Issues</b>. Artilody Soundsculp is free software under the GPL-3.0 and is built with JUCE.</p>

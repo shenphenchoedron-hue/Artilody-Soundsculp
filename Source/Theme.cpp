@@ -4,8 +4,9 @@
 juce::Colour Theme::markerColour (int index)
 {
     static const juce::uint32 colours[] = { 0xff3b82f6, 0xfff97316, 0xff14c8a0, 0xffa855f7,
-                                            0xffef4444, 0xffeab308, 0xffec4899, 0xff22c55e };
-    return juce::Colour (colours[(size_t) (std::abs (index) % 8)]);
+                                            0xffef4444, 0xffeab308, 0xffec4899, 0xff22c55e,
+                                            0xff06b6d4, 0xff8b5a2b, 0xff94a3b8, 0xffffffff };
+    return juce::Colour (colours[(size_t) (std::abs (index) % numMarkerColours)]);
 }
 
 juce::Colour Theme::bandColour (int index)
@@ -139,6 +140,46 @@ void Icons::draw (juce::Graphics& g, const juce::String& name, juce::Rectangle<f
     {
         p.addEllipse (4, 4, 12, 12); line (14.5f, 14.5f, 20, 20); line (7, 10, 13, 10);
         if (name == "zoomin") line (10, 7, 10, 13);
+    }
+    else if (name == "fit")
+    {
+        line (3, 12, 21, 12);
+        p.startNewSubPath (6.5f, 8.5f); p.lineTo (3, 12); p.lineTo (6.5f, 15.5f);
+        p.startNewSubPath (17.5f, 8.5f); p.lineTo (21, 12); p.lineTo (17.5f, 15.5f);
+        line (3, 4, 3, 20); line (21, 4, 21, 20);
+        p.applyTransform (AffineTransform::scale (0.9f, 1.0f, 12, 12));
+    }
+    else if (name == "zoomsel")
+    {
+        p.addEllipse (6, 6, 11, 11); line (15.5f, 15.5f, 21, 21);
+        p.startNewSubPath (5, 3); p.lineTo (3, 3); p.lineTo (3, 9);
+        p.startNewSubPath (13, 3); p.lineTo (15, 3);
+        f.addRectangle (9.0f, 9.0f, 5.0f, 5.0f);
+    }
+    else if (name == "taller" || name == "shorter")
+    {
+        line (4, 4, 20, 4); line (4, 20, 20, 20); line (12, 7, 12, 17);
+        if (name == "taller") { f.addTriangle (12, 6.5f, 8.5f, 10.5f, 15.5f, 10.5f); f.addTriangle (12, 17.5f, 8.5f, 13.5f, 15.5f, 13.5f); }
+        else                  { f.addTriangle (12, 11, 8.5f, 7, 15.5f, 7); f.addTriangle (12, 13, 8.5f, 17, 15.5f, 17); }
+    }
+    else if (name == "split")
+    {
+        p.addRoundedRectangle (2.0f, 7.0f, 8.0f, 10.0f, 1.5f);
+        p.addRoundedRectangle (14.0f, 7.0f, 8.0f, 10.0f, 1.5f);
+        line (12, 3, 12, 5.5f); line (12, 9, 12, 11); line (12, 13, 12, 15); line (12, 18.5f, 12, 21);
+    }
+    else if (name == "join")
+    {
+        p.addRoundedRectangle (2.0f, 7.0f, 20.0f, 10.0f, 1.5f);
+        line (8, 12, 11, 12); line (13, 12, 16, 12);
+        f.addTriangle (11.5f, 12, 9.5f, 10, 9.5f, 14); f.addTriangle (12.5f, 12, 14.5f, 10, 14.5f, 14);
+    }
+    else if (name == "merge")
+    {
+        p.startNewSubPath (4, 4); p.lineTo (4, 8); p.quadraticTo (4, 12, 12, 13);
+        p.startNewSubPath (20, 4); p.lineTo (20, 8); p.quadraticTo (20, 12, 12, 13);
+        line (12, 13, 12, 18);
+        f.addTriangle (12, 22, 8, 17, 16, 17);
     }
     else if (name == "plus")       { line (12, 4.5f, 12, 19.5f); line (4.5f, 12, 19.5f, 12); }
     else if (name == "close")      { line (6, 6, 18, 18); line (18, 6, 6, 18); }
@@ -385,4 +426,39 @@ void SwitchButton::paintButton (juce::Graphics& g, bool, bool)
     auto knob = juce::Rectangle<float> (16.0f, 16.0f).withCentre ({ on ? b.getRight() - 11.0f : b.getX() + 11.0f, b.getCentreY() });
     g.setColour (juce::Colours::white);
     g.fillEllipse (knob);
+}
+
+//==============================================================================
+namespace
+{
+    class PaletteColourSelector : public juce::ColourSelector,
+                                  private juce::ChangeListener
+    {
+    public:
+        PaletteColourSelector (juce::Colour initial, std::function<void (juce::Colour)> cb)
+            : juce::ColourSelector (juce::ColourSelector::showColourspace | juce::ColourSelector::showColourAtTop),
+              callback (std::move (cb))
+        {
+            setCurrentColour (initial, juce::dontSendNotification);
+            addChangeListener (this);
+            setSize (300, 330);
+        }
+
+        int getNumSwatches() const override                       { return Theme::numMarkerColours; }
+        juce::Colour getSwatchColour (int index) const override   { return Theme::markerColour (index); }
+        void setSwatchColour (int, const juce::Colour&) override  {}
+
+    private:
+        void changeListenerCallback (juce::ChangeBroadcaster*) override
+        {
+            if (callback) callback (getCurrentColour().withAlpha (1.0f));
+        }
+        std::function<void (juce::Colour)> callback;
+    };
+}
+
+void showColourPicker (juce::Rectangle<int> screenArea, juce::Colour initial, std::function<void (juce::Colour)> onChange)
+{
+    auto picker = std::make_unique<PaletteColourSelector> (initial, std::move (onChange));
+    juce::CallOutBox::launchAsynchronously (std::move (picker), screenArea, nullptr);
 }

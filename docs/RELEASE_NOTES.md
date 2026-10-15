@@ -1,25 +1,26 @@
-## Artilody Soundsculp 1.0.0
-
-Første udgivelse / First release.
+## Artilody Soundsculp 1.1.0
 
 ### Download
-| System | Fil / File |
+| System | File |
 |---|---|
-| Windows 10/11 (64-bit) | `ArtilodySoundsculp-1.0.0-Windows-Setup.exe` (installer) eller/or `…-Windows-Portable.zip` |
-| macOS 11+ (Intel + Apple Silicon) | `ArtilodySoundsculp-1.0.0-macOS-Universal.dmg` |
-| Debian 12+ | `artilody-soundsculp_1.0.0_debian-12_amd64.deb` |
-| Ubuntu 22.04 / 24.04 | `artilody-soundsculp_1.0.0_ubuntu-22.04-24.04_amd64.deb` |
+| Windows 10/11 (64-bit) | `ArtilodySoundsculp-1.1.0-Windows-Setup.exe` (installer) or `…-Windows-Portable.zip` |
+| macOS 11+ (Intel + Apple Silicon) | `ArtilodySoundsculp-1.1.0-macOS-Universal.dmg` |
+| Debian 12+ | `artilody-soundsculp_1.1.0_debian-12_amd64.deb` |
+| Ubuntu 22.04 / 24.04 | `artilody-soundsculp_1.1.0_ubuntu-22.04-24.04_amd64.deb` |
 
-Manualer / Manuals: `Artilody-Soundsculp-Manual-DA.pdf` (dansk) og/and `Artilody-Soundsculp-Manual-EN.pdf` (English).
+User manuals: `Artilody-Soundsculp-Manual-EN.pdf` (English) and `Artilody-Soundsculp-Manual-DA.pdf` (Danish).
 
-Linux: `sudo apt install ./artilody-soundsculp_*.deb`  
-macOS: first launch with right-click → Open (the app is not notarised).
+Linux: `sudo apt install ./artilody-soundsculp_*.deb` · macOS: first launch with right-click → Open (the app is not notarised).
 
-### Funktioner / Features
-- Flere spor, tomme spor, indsæt fil, kopiér mellem spor, flet spor / multiple tracks, empty tracks, insert file, copy between tracks, merge tracks
-- Markér, trim, klip/kopiér/indsæt, fade ind/ud, normalisér, stilhedstrim, loop, baglæns / select, trim, cut/copy/paste, fades, normalize, silence trim, loop, reverse
-- Tone uden hastighedsændring / pitch shift without changing speed
-- Parametrisk 4-bånds EQ og støjfjerner / parametric 4-band EQ and noise remover
-- Volumenlinje med punkter og tekstmarkører / volume envelope and text markers
-- Optag, afspil, loop / record, play, loop
-- Eksport: WAV, AIFF, FLAC, OGG, MP3, M4A (AAC/ALAC), Opus – samt alle spor mixet til én fil / plus all tracks mixed into one file
+### New in 1.1.0
+- All tracks are shown below each other on a shared timeline and **play together**
+- **Clips** like in Audacity: cut/delete leave a gap, Split (Ctrl+I), Join (Ctrl+J), drag clips by their name bar – also onto other tracks, Delete and close gap (Shift+Delete), right-click menu
+- **Mute / Solo** per track
+- **Merge** button in the Tracks panel (volume lines are included in the merged track)
+- **Markers per track** – only the number is shown under the track, text in the Markers panel, **custom marker colours**
+- Zoom bar (zoom in/out, zoom to selection, show all) and adjustable **track height**
+- Clearer **Open** buttons
+- New, cleaner **Export** dialog
+- English user interface by default (Danish available under Settings → Language)
+- New Artilody logo and app icon
+- The overview strip was removed

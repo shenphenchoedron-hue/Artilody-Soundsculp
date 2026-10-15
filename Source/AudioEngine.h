@@ -72,7 +72,7 @@ private:
     std::vector<AudioDocument*> documents;
     AudioDocument* current = nullptr;
 
-    std::atomic<bool> playing { false }, looping { false }, mixAll { false };
+    std::atomic<bool> playing { false }, looping { false }, mixAll { true };   // all tracks play together
     std::atomic<bool> previewing { false }, recording { false };
     std::atomic<bool> reachedEnd { false };
     std::atomic<double> position { 0.0 }, loopStart { 0.0 }, loopEnd { 0.0 };

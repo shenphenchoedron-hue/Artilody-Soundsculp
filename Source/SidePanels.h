@@ -27,7 +27,7 @@ public:
     void resized() override;
 
     std::function<void (int)> onSelect, onClose;
-    std::function<void()> onAddMenu;
+    std::function<void()> onAddMenu, onOpen, onMerge;
 
 private:
     struct Row : public juce::Component
@@ -51,6 +51,8 @@ private:
     };
 
     IconButton addButton { "plus" };
+    IconButton openButton { "open", T ("Open", "Åbn") };
+    IconButton mergeButton { "merge", T ("Merge", "Flet") };
     juce::Viewport viewport;
     juce::Component list;
     juce::OwnedArray<Row> rows;
@@ -75,10 +77,12 @@ private:
 class MarkersPanel : public Card
 {
 public:
+    void paint (juce::Graphics&) override;
     MarkersPanel();
     void setDocument (AudioDocument* d);
     void refresh();
     void focusMarker (int index);
+    void chooseColour (int index, juce::Rectangle<int> screenArea);
     void resized() override;
 
     std::function<void()> onAdd;
@@ -93,8 +97,16 @@ private:
         void resized() override;
         void mouseUp (const juce::MouseEvent&) override;
 
+        struct ColourButton : public juce::Button
+        {
+            ColourButton() : juce::Button ("colour") { setMouseCursor (juce::MouseCursor::PointingHandCursor); }
+            juce::Colour colour;
+            void paintButton (juce::Graphics&, bool highlighted, bool down) override;
+        };
+
         MarkersPanel& owner;
         int index;
+        ColourButton colourButton;
         juce::TextEditor nameEditor;
         IconButton deleteButton { "close" };
     };

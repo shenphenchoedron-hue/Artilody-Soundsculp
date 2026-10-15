@@ -6,16 +6,17 @@ A simple multi-track audio editor built with C++ and [JUCE](https://juce.com).
 ![Screenshot](docs/images/screenshot_en.png)
 
 ## Features
-- Open several audio files (WAV, AIFF, FLAC, OGG, MP3, and via ffmpeg M4A/Opus/WMA …) – each becomes a track
-- Create empty tracks, insert audio files, copy pieces between tracks, merge tracks into one
-- Mouse selection, trim, cut/copy/paste, fade in/out, normalize, silence trim, loop, reverse
+- Several audio tracks below each other on a shared timeline – all tracks play together, with Mute/Solo per track
+- Audacity-style clips: cut/delete leave gaps, split, join, drag clips around and onto other tracks
+- Open WAV, AIFF, FLAC, OGG, MP3 (and via ffmpeg M4A/Opus/WMA …); create empty tracks, insert files, merge tracks into one
+- Trim, cut/copy/paste, fade in/out, normalize, silence trim, loop, reverse
 - Pitch shift without changing the speed (phase vocoder)
 - Parametric 4-band EQ (live preview + apply) and spectral noise remover with spectrum display
-- Per-track volume envelope with mouse-editable points
-- Text markers on a marker line below the waveform, edited in the Markers panel
+- Per-track volume line with mouse-editable points
+- Numbered, coloured markers per track with text in the Markers panel
 - Colourful transport: record, go to start, play, stop, loop (record/play light up)
-- Export to WAV (16/24/32f), AIFF, FLAC, OGG Vorbis, MP3, M4A (AAC/ALAC), Opus – track, selection or all tracks mixed
-- Undo/redo, zoom, English and Danish user interface
+- Export dialog: WAV (16/24/32f), AIFF, FLAC, Apple Lossless, OGG, MP3, M4A/AAC, Opus – track, selection or all tracks mixed
+- Zoom bar, track height, undo/redo; English UI (Danish optional)
 
 ## Download
 See [Releases](https://github.com/shenphenchoedron-hue/Artilody-Soundsculp/releases) for installers for Windows, macOS, Debian and Ubuntu,
