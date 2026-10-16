@@ -9,7 +9,7 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 # because of cmake_minimum_required(3.22); must be set before JUCE is added.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-project(ArtilodySoundsculp VERSION 1.1.3 LANGUAGES C CXX)
+project(ArtilodySoundsculp VERSION 1.1.4 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

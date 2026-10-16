@@ -11,7 +11,7 @@
   <img class="logo" src="../../Resources/icon_256.png" alt="Logo">
   <h1>Artilody Soundsculp</h1>
   <div class="sub">Brugermanual – dansk</div>
-  <div class="ver">Version 1.1.3</div>
+  <div class="ver">Version 1.1.4</div>
 </div>
 
 <h2>Indhold</h2>
@@ -52,14 +52,14 @@ Denne manual bruger de engelske navne på knapperne, med den danske betydning i 
 <p>Hent installationsfilen fra siden <b>Releases</b> på <code>github.com/shenphenchoedron-hue/Artilody-Soundsculp</code>.</p>
 <h3>Windows (10 og 11)</h3>
 <ol>
-  <li>Hent <code>ArtilodySoundsculp-1.1.3-Windows-Setup.exe</code> og dobbeltklik på den.</li>
+  <li>Hent <code>ArtilodySoundsculp-1.1.4-Windows-Setup.exe</code> og dobbeltklik på den.</li>
   <li>Viser Windows SmartScreen "Windows beskyttede din pc", så klik <b>Flere oplysninger</b> → <b>Kør alligevel</b>.</li>
   <li>Følg guiden. Programmet og manualerne findes derefter i Start-menuen.</li>
 </ol>
 <p>Der findes også en <i>Portable</i>-zip, som kan pakkes ud og køres uden installation.</p>
 <h3>macOS (11 eller nyere, Intel og Apple Silicon)</h3>
 <ol>
-  <li>Hent <code>ArtilodySoundsculp-1.1.3-macOS-Universal.dmg</code>, åbn den og træk programmet over i <b>Programmer</b>.</li>
+  <li>Hent <code>ArtilodySoundsculp-1.1.4-macOS-Universal.dmg</code>, åbn den og træk programmet over i <b>Programmer</b>.</li>
   <li>Første gang (programmet er ikke notariseret): på macOS 15 Sequoia eller nyere skal du først prøve at åbne programmet,
       derefter åbne <b>Systemindstillinger → Anonymitet og sikkerhed</b> og klikke <b>Åbn alligevel</b> ved beskeden om Artilody Soundsculp.
       På macOS 11–14 kan du i stedet højreklikke på programmet, vælge <b>Åbn</b> og bekræfte. Alternativt kan du skrive i Terminal:
@@ -68,7 +68,7 @@ Denne manual bruger de engelske navne på knapperne, med den danske betydning i 
 </ol>
 <h3>Debian (12+) og Ubuntu (22.04 / 24.04)</h3>
 <p>Hent den <code>.deb</code>-fil der passer til dit system og installér med fx:</p>
-<p><code>sudo apt install ./artilody-soundsculp_1.1.3_debian-12_amd64.deb</code></p>
+<p><code>sudo apt install ./artilody-soundsculp_1.1.4_debian-12_amd64.deb</code></p>
 <p>Programmet findes i programmenuen under <b>Lyd og video</b> eller startes med <code>artilody-soundsculp</code>.
 Pakken er selvstændig – alt hvad programmet skal bruge følger med, så der skal ikke hentes andet. Afinstallér med <code>sudo apt remove artilody-soundsculp</code>.</p>
 
@@ -173,8 +173,11 @@ Står den i et hul, skubbes det efterfølgende kun, hvis der ikke er plads. Er d
 <h2>11. Volumenlinjen</h2>
 <p>Hvert spor har en orange volumenlinje, der styrer lydstyrken undervejs uden at ændre selve lyden. Den bruges ved afspilning, fletning og eksport.</p>
 <ul>
-  <li>Vælg værktøjet <b>Volume</b> og klik for at indsætte punkter; træk dem op og ned. Midten er 0 dB, toppen +6 dB, bunden stilhed.</li>
-  <li>Med <b>Select</b> kan du trække eksisterende punkter og dobbeltklikke på linjen for at indsætte nye.</li>
+  <li>Linjen er altid synlig. Uden punkter er den en stiplet linje i midten (0 dB, uændret lydstyrke).</li>
+  <li>Klik på <b>Volume</b> for at slå volumentilstand til, og klik så på eller tæt ved den orange linje for at indsætte punkter og træk dem op og ned.
+      Midten er 0 dB, toppen +6 dB, bunden stilhed. Klikker du væk fra linjen, markerer du som normalt.</li>
+  <li>Klik på <b>Volume</b> igen, tryk <kbd>Esc</kbd> eller klik på et andet værktøj for at forlade volumentilstand.</li>
+  <li>Med <b>Select</b> kan du stadig trække eksisterende punkter og dobbeltklikke på linjen for at indsætte nye.</li>
   <li>Højreklik på et punkt for at slette det. <b>File-panelet → … → Reset volume line</b> fjerner alle.</li>
   <li>Volumenlinjen hører til sporets tidslinje – flytter du et klip, bliver linjen liggende.</li>
 </ul>
