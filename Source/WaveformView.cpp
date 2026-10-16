@@ -142,11 +142,11 @@ int WaveformView::findEnvelopePointAt (juce::Point<float> p) const
     return -1;
 }
 
-bool WaveformView::isNearEnvelopeLine (juce::Point<float> p) const
+bool WaveformView::isNearEnvelopeLine (juce::Point<float> p, float tolerance) const
 {
     if (doc == nullptr) return false;
     auto g = doc->gainAt (sampleForX (p.x) / doc->sampleRate);
-    return std::abs (yForGain (g) - p.y) < 7.0f;
+    return std::abs (yForGain (g) - p.y) < tolerance;
 }
 
 int WaveformView::findClipBarAt (juce::Point<float> p) const
@@ -500,12 +500,15 @@ void WaveformView::drawEnvelope (juce::Graphics& g)
     const float left = (float) waveArea.getX(), right = (float) waveArea.getRight();
     const float lenX = juce::jmin (right, xForSample ((double) doc->getLength()));
 
+    const bool editing = tool == Tool::volume;
+
     if (! active)
     {
-        if (tool != Tool::volume) return;
+        // The volume line is always visible: flat at 0 dB until points are added
+        if (lenX <= left) return;
         const float dash[] = { 6.0f, 4.0f };
-        g.setColour (Theme::envelope.withAlpha (0.8f));
-        g.drawDashedLine (juce::Line<float> (left, yForGain (1.0f), lenX, yForGain (1.0f)), dash, 2, 2.0f);
+        g.setColour (Theme::envelope.withAlpha (editing ? 0.9f : 0.55f));
+        g.drawDashedLine (juce::Line<float> (left, yForGain (1.0f), lenX, yForGain (1.0f)), dash, 2, editing ? 2.0f : 1.5f);
         return;
     }
 
@@ -537,8 +540,8 @@ void WaveformView::drawEnvelope (juce::Graphics& g)
                                              Theme::envelope.withAlpha (0.0f), 0, (float) waveArea.getBottom(), false));
     g.fillPath (fill);
 
-    g.setColour (Theme::envelope);
-    g.strokePath (exact, juce::PathStrokeType (2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setColour (Theme::envelope.withAlpha (editing ? 1.0f : 0.8f));
+    g.strokePath (exact, juce::PathStrokeType (editing ? 2.4f : 1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
     for (int i = 0; i < (int) doc->envelope.size(); ++i)
     {
@@ -647,7 +650,7 @@ void WaveformView::mouseMove (const juce::MouseEvent& e)
     {
         if (hoverEnvelope >= 0)
             cursor = juce::MouseCursor::DraggingHandCursor;
-        else if (tool == Tool::volume)
+        else if (tool == Tool::volume && isNearEnvelopeLine (p, 24.0f))
             cursor = juce::MouseCursor::CrosshairCursor;
         else if (doc->hasSelection() && (std::abs (p.x - xForSample ((double) doc->selStart)) < 6
                                          || std::abs (p.x - xForSample ((double) doc->selEnd)) < 6))
@@ -663,8 +666,8 @@ void WaveformView::mouseMove (const juce::MouseEvent& e)
 
     if (waveArea.contains (e.getPosition()))
         setTooltip (tool == Tool::volume
-                        ? T ("Click to add a volume point. Drag points up/down. Right-click a point to delete it.",
-                             "Klik for at tilføje et volumenpunkt. Træk punkter op/ned. Højreklik på et punkt for at slette det.")
+                        ? T ("Volume mode: click on or near the orange line to add a point, drag points up/down, right-click a point to delete it. Click the Volume button again (or press Esc) to leave.",
+                             "Volumentilstand: klik på eller tæt ved den orange linje for at tilføje et punkt, træk punkter op/ned, højreklik på et punkt for at slette det. Klik på Volumen-knappen igen (eller tryk Esc) for at forlade.")
                         : T ("Drag to select. Double-click between markers to select that part. Double-click the orange line to add a volume point.",
                              "Træk for at markere. Dobbeltklik mellem markører for at markere den del. Dobbeltklik på den orange linje for at tilføje et volumenpunkt."));
     else if (laneArea.contains (e.getPosition()))
@@ -780,7 +783,7 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    if (tool == Tool::volume && e.mods.isLeftButtonDown())
+    if (tool == Tool::volume && e.mods.isLeftButtonDown() && isNearEnvelopeLine (p, 24.0f))
     {
         if (editsBlocked())
             return;
@@ -969,7 +972,7 @@ void WaveformView::mouseDoubleClick (const juce::MouseEvent& e)
         return;
     }
 
-    if (! waveArea.contains (e.getPosition()) || tool == Tool::volume)
+    if (! waveArea.contains (e.getPosition()))
         return;
 
     if (isNearEnvelopeLine (p) && findEnvelopePointAt (p) < 0 && ! editsBlocked())

@@ -1291,18 +1291,31 @@ void MainComponent::getTargetRange (juce::int64& s, juce::int64& e) const
     else                   { s = 0; e = d->getLength(); }
 }
 
+void MainComponent::setSelectTool()
+{
+    trackStack.setTool (WaveformView::Tool::select);
+    toolbar.get ("select")->setToggleState (true, juce::dontSendNotification);
+    toolbar.get ("volume")->setToggleState (false, juce::dontSendNotification);
+}
+
 void MainComponent::handleTool (const juce::String& id)
 {
     if (id == "select" || id == "volume")
     {
-        bool vol = id == "volume";
+        // The Volume button toggles: a second click goes back to normal selecting
+        bool vol = id == "volume" && trackStack.getTool() != WaveformView::Tool::volume;
         trackStack.setTool (vol ? WaveformView::Tool::volume : WaveformView::Tool::select);
         toolbar.get ("select")->setToggleState (! vol, juce::dontSendNotification);
         toolbar.get ("volume")->setToggleState (vol, juce::dontSendNotification);
-        if (vol) showMessage (T ("Volume tool: click on the waveform to add points, drag them up/down, right-click to delete.",
-                                 "Volumenværktøj: klik på bølgeformen for at tilføje punkter, træk dem op/ned, højreklik for at slette."));
+        showMessage (vol ? T ("Volume mode on: click on the orange line to add points, drag them up/down, right-click to delete. Click Volume again or press Esc to leave.",
+                              "Volumentilstand til: klik på den orange linje for at tilføje punkter, træk dem op/ned, højreklik for at slette. Klik på Volumen igen eller tryk Esc for at forlade.")
+                         : T ("Volume mode off.", "Volumentilstand fra."));
         return;
     }
+
+    // Any other tool button leaves volume mode so the normal selection works again
+    if (id != "eq" && id != "noise" && trackStack.getTool() == WaveformView::Tool::volume)
+        setSelectTool();
     if (id == "eq" || id == "noise")
     {
         auto* b = toolbar.get (id);
@@ -2172,6 +2185,12 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     const int code = key.getKeyCode();
     const auto mods = key.getModifiers();
 
+    if (key == juce::KeyPress::escapeKey && trackStack.getTool() == WaveformView::Tool::volume)
+    {
+        setSelectTool();
+        showMessage (T ("Volume mode off.", "Volumentilstand fra."));
+        return true;
+    }
     if (key == juce::KeyPress::spaceKey)                           { togglePlay(); return true; }
 
     // No edits/undo while a mouse drag is in progress: they would change the clip/marker/envelope
@@ -2694,6 +2713,18 @@ int MainComponent::runUiTest()
     auto mix = mixTracks (allDocuments(), rate, norm);
     check (std::abs (mix.getNumSamples() / rate - piano->getLengthSeconds()) < 0.001, "mix length = longest track");
     check (DSP::getPeak (mix) <= 1.0f, "mix does not clip");
+
+    // volume tool can be switched off again
+    handleTool ("volume");
+    check (trackStack.getTool() == WaveformView::Tool::volume, "volume button turns volume mode on");
+    handleTool ("volume");
+    check (trackStack.getTool() == WaveformView::Tool::select, "second click on volume turns it off");
+    handleTool ("volume");
+    handleTool ("copy");
+    check (trackStack.getTool() == WaveformView::Tool::select, "other tool buttons leave volume mode");
+    handleTool ("volume");
+    keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
+    check (trackStack.getTool() == WaveformView::Tool::select, "Esc leaves volume mode");
 
     // volume line is baked into a merge
     {

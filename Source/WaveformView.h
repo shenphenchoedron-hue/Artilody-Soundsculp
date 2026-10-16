@@ -126,7 +126,7 @@ private:
     float yForGain (float gain) const;
     float gainForY (float y) const;
     int findEnvelopePointAt (juce::Point<float> p) const;
-    bool isNearEnvelopeLine (juce::Point<float> p) const;
+    bool isNearEnvelopeLine (juce::Point<float> p, float tolerance = 7.0f) const;
     int findMarkerAt (juce::Point<float> p) const;
     juce::int64 clampSample (double s) const;
     // While recording, the recorded clip refers directly into the recorder's memory:

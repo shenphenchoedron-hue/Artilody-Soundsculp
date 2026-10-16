@@ -70,6 +70,7 @@ public:
     int getNumLanes() const                     { return lanes.size(); }
     void repaintAll();
     void setTool (WaveformView::Tool t);
+    WaveformView::Tool getTool() const          { return tool; }
     void changeLaneHeight (float factor);
     void fitLaneHeights()                       { laneHeight = 0; layoutLanes(); }
     void ensureLaneVisible (int index);

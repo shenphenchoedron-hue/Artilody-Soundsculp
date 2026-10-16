@@ -121,6 +121,7 @@ private:
     bool requireSelection (const juce::String& what);
     void getTargetRange (juce::int64& start, juce::int64& end) const;   // selection or whole track
     void handleTool (const juce::String& id);
+    void setSelectTool();
     void doTrim();
     void doCut();
     void doCopy();
