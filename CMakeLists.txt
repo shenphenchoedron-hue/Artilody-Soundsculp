@@ -9,7 +9,7 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 # because of cmake_minimum_required(3.22); must be set before JUCE is added.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-project(ArtilodySoundsculp VERSION 1.1.4 LANGUAGES C CXX)
+project(ArtilodySoundsculp VERSION 1.1.5 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,6 +20,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(JUCE_DIR "" CACHE PATH "Path to a local JUCE checkout (optional)")
 
 if(JUCE_DIR)
+    set(SOUNDSCULP_JUCE_SOURCE "${JUCE_DIR}")
     add_subdirectory(${JUCE_DIR} ${CMAKE_BINARY_DIR}/JUCE EXCLUDE_FROM_ALL)
 else()
     include(FetchContent)
@@ -38,6 +39,27 @@ else()
     if(NOT juce_POPULATED)
         FetchContent_Populate(JUCE)
         add_subdirectory(${juce_SOURCE_DIR} ${juce_BINARY_DIR} EXCLUDE_FROM_ALL)
+    endif()
+    set(SOUNDSCULP_JUCE_SOURCE "${juce_SOURCE_DIR}")
+endif()
+
+# ---------------------------------------------------------------------------
+# Linux: the app does not use MIDI. JUCE's AudioDeviceManager always opens the
+# ALSA sequencer (/dev/snd/seq) at start-up, and if another program has hung
+# the sequencer, that call blocks forever and the app never starts. Make the
+# ALSA MIDI code optional so it can be compiled out with SOUNDSCULP_NO_ALSA_MIDI.
+# ---------------------------------------------------------------------------
+set(_juce_midi_linux "${SOUNDSCULP_JUCE_SOURCE}/modules/juce_audio_devices/native/juce_Midi_linux.cpp")
+if(EXISTS "${_juce_midi_linux}")
+    file(READ "${_juce_midi_linux}" _midi_src)
+    string(FIND "${_midi_src}" "SOUNDSCULP_NO_ALSA_MIDI" _already_patched)
+    if(_already_patched EQUAL -1)
+        string(REPLACE "#if JUCE_ALSA\n" "#if JUCE_ALSA && ! SOUNDSCULP_NO_ALSA_MIDI\n" _midi_src_new "${_midi_src}")
+        if(_midi_src_new STREQUAL _midi_src)
+            message(FATAL_ERROR "Could not patch ${_juce_midi_linux} (JUCE layout changed?)")
+        endif()
+        file(WRITE "${_juce_midi_linux}" "${_midi_src_new}")
+        message(STATUS "Patched JUCE: ALSA MIDI can be disabled (SOUNDSCULP_NO_ALSA_MIDI)")
     endif()
 endif()
 
@@ -104,6 +126,7 @@ target_sources(ArtilodySoundsculp PRIVATE
 target_compile_definitions(ArtilodySoundsculp PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
+    SOUNDSCULP_NO_ALSA_MIDI=1
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:ArtilodySoundsculp,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:ArtilodySoundsculp,JUCE_VERSION>"
     JUCE_USE_MP3AUDIOFORMAT=1
